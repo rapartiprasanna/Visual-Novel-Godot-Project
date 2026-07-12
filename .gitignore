@@ -1,0 +1,21 @@
+# Godot 4
+.godot/
+*.translation
+export.cfg
+export_presets.cfg
+
+# Imported assets
+*.import
+
+# Mono-specific (if ever used)
+.mono/
+data_*/
+mono_crash.*.json
+
+# System / IDE
+.DS_Store
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
