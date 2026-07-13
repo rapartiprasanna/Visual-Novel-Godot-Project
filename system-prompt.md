@@ -38,7 +38,8 @@ The application architecture relies on a master State Manager that switches betw
 2. **Default/Home Hub Scene (The Sect Mountain)**
    - Visual Base: Static background image representing the Sect Mountain.
    - Dynamic Overlays: Interactive scene buttons populate dynamically over the mountain based on global calendar or narrative triggers.
-   - Persistent UI Overlay: Global access to Settings, Player Profile/Stats Panel, and the "Chronicle Calendar" (which tracks events across current and historical playthroughs).
+   - Persistent UI Overlay: Global access to Settings, Player Profile/Stats Panel, and the Calendar / Chronicle UI (see Section 6).
+   - Time: Most activities advance the day clock via Flow A (activity → duration → resolve → return). See Section 6 for interrupt rules, nested places, and demo time costs (Training Grounds = 1 day; Elder = instant).
 
 3. **Dialogue Scene (Visual Novel Mode)**
    - Textbox UI for sequential dialogue processing with type-writer text progression.
@@ -79,8 +80,8 @@ Every action has two components:
 | Archetype | Example | Resolution |
 |-----------|---------|------------|
 | Instant strike | Punch (1w, 0d) | Effect at windup end |
-| Duration strike | Sword flurry (1w, 3d) | Effect over duration |
-| Movement | Walk (0w, 1d per tile) | Position updates over duration |
+| Duration strike / sustained AoE | Sword flurry / Qi Beam (2w, 2d) | Effect over duration — beam pulses once per duration point for anyone on the line |
+| Movement | Walk (0w, 1d per tile) | Position updates over duration; blocked tiles wait/retry within budget |
 | Stance | Block (0w, 1d per pt) | Mitigation active during duration |
 
 - **Repeats**: Allowed in demo. Future: per-action `cooldown_turns`.
@@ -93,6 +94,7 @@ Every action has two components:
 | Canonical unit | **Tiles** (1 tile = 1 Godot unit; ~2 ft is display-only flavor) |
 | Demo grid size | **8×8** (tunable) |
 | Walk cost | **1 point per tile** (Manhattan path) |
+| Occupancy | **One living combatant per tile.** Walk resolves **tile-by-tile**. Cannot enter a tile another unit occupies unless that occupant leaves on the same timestamp (swaps/chains OK). If blocked, the walker **waits on that duration tick** and **retries the same step** on later ticks once the tile clears (within the remaining Walk budget). Unfinished tiles at Walk end refund as **floating**. Two movers claiming the same tile at once both wait and retry. Blink cannot land on an occupied tile. |
 | Blink range | **Chebyshev** distance; no line-of-sight in demo |
 | Beams / AoE | Measured in **tiles** (Bresenham line for beams) |
 | Friendly fire | **On** for all AoE |
@@ -167,8 +169,8 @@ final = raw × (1 - mitigation)
 | Walk | 0 | 1/tile | 1 pt/tile | Default chase; Manhattan |
 | Punch | 1 | 0 | 1 pt | Melee adjacent; auto-target |
 | Block | 0 | 1/pt | 1 pt | Merge consecutive; default defensive |
-| Beam | 2 | 0 | 4 pt | Line AoE; penetration; friendly fire |
-| Blink | 2 | 0 | 5 pt | Teleport; Chebyshev range 4 |
+| Beam | 2 | 2 | 4 pt | Sustained line AoE; damage **each duration tick** while a unit stays on the beam; penetration; friendly fire |
+| Blink | 2 | 0 | 5 pt | Teleport; Chebyshev range **5** |
 
 ## 4.10 Combat UI Requirements
 **Planning phase**: action queue, skill palette, `allocated / max` points, floating points, selected-action detail panel, undo/clear queue, lock-in button, aggressive/defensive toggle, last-target indicator, range overlays (green valid / red invalid), HP bars.
@@ -176,6 +178,8 @@ final = raw × (1 - mitigation)
 **Resolution phase**: phase label (Planning → Resolving), combat log, optional damage floaters.
 
 **Blink targeting**: Highlight cursor tile green; show path from current tile; red for out-of-range; click valid tile to queue destination.
+
+**Presentation note (demo)**: Resolution is **logic-instant** — positions snap and the combat log prints results with no tweened travel or wall-clock playback of the timeline. Timed/visual resolution playback (markers sliding tile-to-tile over the turn clock) is deferred polish, not required for demo correctness.
 
 ## 4.11 Resolution Algorithm (Implementation Target)
 ```
@@ -235,7 +239,106 @@ CombatantState
 
 # ==============================================================================
 
-# SECTION 6: AI COMMUNICATION & TUTORING PROTOCOL
+# SECTION 6: CALENDAR, TIME & CHRONICLE
+
+## 6.1 Role
+The calendar is the **time-budget and encounter-resolution layer**. Hub activities consume discrete time. Story content is keyed by **place ∩ time**. Being in the right place during an event’s trigger window fires that encounter instead of the activity’s default outcome. Missing many events is intentional; meta-progression fills future dates with previously discovered encounters on later runs.
+
+## 6.2 Commit Flow (Flow A)
+1. Player picks an **activity** from the hub (or a destination hub such as a village).
+2. Player picks **duration** when applicable (some activities always default, e.g. explore gardens = 1 day).
+3. Resolver runs (see 6.5); activity resolves as flavor beat, short cutscene, minigame, dialogue, and/or combat.
+4. Player returns to the home hub; calendar shows the new date and updated log.
+
+**Rule:** Every day must advance via an activity. There is no free “skip time” scrubber. Seclusion / closed-door cultivation is the intentional sink for jumping toward a known future date.
+
+## 6.3 Time Unit & Scale
+| Horizon | Rule |
+|---------|------|
+| **Demo** | Atomic unit = **1 day**. Durations are integer day counts (1 day, N days, 1 week as 7 days, etc.). |
+| **Future** | Same day engine; long spans (months / years of cultivation) stay one committed block that plays as a short cutscene + results panel. Early story may still feel daily/weekly; later game stretches timescale without changing the commit model. |
+
+## 6.4 Places (Nested)
+Places form a hierarchy (e.g. `sect_mountain` → `west_slope`, `gardens`, `elders_pavilion`). Matching rules:
+- An event placed on a **parent** fires when the player is at any **child**.
+- An event placed on a **child** does **not** fire at a sibling.
+- Travel corridors (e.g. `road_to_village`) are their own place nodes for matching.
+
+**Demo hub time costs:**
+- `elders_pavilion` — **instant** (no calendar advance).
+- `training_grounds` — **costs 1 day**.
+
+## 6.5 Event Timing Fields
+| Field | Meaning |
+|-------|---------|
+| **Trigger range** | Inclusive date window during which being at a matching place can **start** the event. |
+| **Event duration** | Calendar days consumed **once triggered**; fixed regardless of when in the trigger range the player hit it. |
+| **Event type** | Used for Calendar color-coding (main, minor, side-story, NPC date, etc.). |
+
+**Consumption:** Triggering an event **consumes it for this run** (no re-fire later in the same window).  
+**Recurring until triggered:** Some events respawn on a schedule (e.g. weekly garden visit) until first successful trigger, then stop permanently for that run.  
+**Missed non-forced events:** Missed completely for that run (except recurring-until-triggered patterns above).  
+**Forced main events (post-demo):** Critical mains (e.g. sect assault) are hard to miss — auto-fire on hub load for that date and/or **break seclusion**. Demo need not implement forced mains.
+
+**Conflict:** Accidental double match at the same place/window → **main** story wins. Content should be authored to avoid this.
+
+## 6.6 Activity Resolution Algorithm
+When the player commits activity `A` at place `P` for planned duration `D` starting on current date `T0`:
+
+1. **Seclusion / closed-door cultivation**  
+   - Ordinary story events do not share seclusion’s place; seclusion **misses** them by design.  
+   - Post-demo: only special forced **main** events may break seclusion (`break if known/marked main overlaps`).  
+   - Presentation: always a short (≈5–10s) cutscene + results (stats / technique gains), whether `D` is 1 day or 10 years.
+
+2. **All other activities (look-ahead collapse)**  
+   - Scan every day in `[T0, T0+D)`. If any day overlaps an unconsumed event’s **trigger range** at a place matching `P` (nested rules):  
+     - **Do not** play generic empty days for the plan.  
+     - Collapse immediately into that event (framed as occurring during the activity).  
+     - Calendar advance = **`days_until_first_overlap + event.duration`**.  
+     - Log lead-in days as the chosen activity (e.g. “Exploring west slope…”) with no separate generic beat, then log the event for its duration days.  
+   - Example: explore 2 days from D1; event trigger opens D2; event duration 3 → land on **D5**.
+
+3. **No overlapping event**  
+   - **Demo:** small flavor text + time passed (`D` days).  
+   - **Later:** per-activity tables (minigames, NPC beats, rewards, side-quest hooks, etc.).
+
+4. **During a triggered event**  
+   - Player is locked in that sequence until `event.duration` is applied, then returned to hub.
+
+5. **Travel** (e.g. 3 days to a village)  
+   - Short transition, then per segment / corridor resolve in order:  
+     1. Planned story event (place + trigger overlap) — **always wins**  
+     2. Else weighted random minor table (authored odds; enemies scaled to player)  
+     3. Else arrive at destination hub (village scene with fewer activities, same hub pattern)  
+   - Random examples: fight beast, find herb, nothing, bandits — then continue/arrive as designed.
+
+## 6.7 Three Data Layers (one UI)
+| Layer | Scope | Role |
+|-------|-------|------|
+| **MasterChronicle** | Authoring / data assets | Internal truth: event id, place, trigger range, duration, type, recurrence, content hooks. Not player-editable. |
+| **PlayerChronicle** | **Global** across all runs & save slots | Starts empty; grows with events the player has encountered on any run. Relevant once multiple saves / NG+ style knowledge exists. |
+| **Run calendar state** | Per save slot | Current date, activity log for this run, which events are consumed this run. |
+
+**Calendar UI (single player-facing view):**
+- **Past (this run):** events/activities already done.
+- **Future markers:** from **PlayerChronicle** (encounters known from prior runs), shown on their dates.
+- **Color-code** by event type (main, minor, side-story, NPC date, …).
+- **PlayerChronicle entries:** same colors, **faded border** (or equivalent) to distinguish from this-run encounters.
+- **Spoiler level:** date + location + color + short spoiler title (partial reveal, not full summary).
+
+First run: PlayerChronicle empty → Calendar shows only this-run past. Later runs: future faded markers guide intentional re-encounters or deliberate avoidance.
+
+## 6.8 Demo Slice (implement this; defer the rest)
+- Visible current date + activity/event log.
+- 1–2 day-costing activities (including Training Grounds = 1 day).
+- Elder audience remains instant.
+- At least one timed story event with trigger range + duration at one nested place.
+- PlayerChronicle stub that records encountered events for a subsequent run’s future markers.
+- Defer for now: sub-profession minigames, rich explore tables, village hubs, travel random tables, forced mains, year-scale UI chrome (engine should still accept large `D` on seclusion).
+
+# ==============================================================================
+
+# SECTION 7: AI COMMUNICATION & TUTORING PROTOCOL
 - **Deep Explanations**: Do not output raw code dumps. Contextualize explanations deeply, teaching the underlying architectural theory. When beneficial, draw analogies to Java structural patterns to bridge gaps in Godot paradigms.
 - **Production-Ready Deliverables**: Write comprehensive code blocks. Avoid truncation shortcuts like `# TODO: implement this` or `# your logic here` within core script files.
 - **Diagnostic Safety Check**: Before printing code snippets, mentally verify they strictly comply with Godot 4 API standards to minimize compiler friction.
