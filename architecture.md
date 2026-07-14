@@ -16,13 +16,13 @@ Condensed session notes. **Game design rules** live in `system-prompt.md`. This 
 ## High-Level Flow
 
 ```
-Main Menu ──New Game──► Home Hub (Sect Mountain)
-     │                        │
-     │                        ├─► Training Grounds / Elder ──► Dialogue
-     │                        ├─► Mountain Gate ──► Combat (scaffold + receipt)
-     │                        ├─► Market Path ──► Shop overlay
-     │                        └─► Overlays: Profile / Chronicle / Settings
-     │
+Main Menu ──File Select (3 slots)──► Home Hub (Sect Mountain)
+     │         empty → new run            │
+     │         occupied → load file       ├─► Training Grounds / Elder ──► Dialogue
+     │                                    ├─► Mountain Gate ──► Combat (scaffold + receipt)
+     │                                    ├─► Market Path ──► Shop overlay
+     │                                    └─► Overlays: Profile / Chronicle / Settings
+     │                                        (autosave to active file; no hub slot picker)
      └── Settings / Shop overlays (stubs)
 ```
 
@@ -47,11 +47,13 @@ Main Menu ──New Game──► Home Hub (Sect Mountain)
 
 ```
 core/
-  game_state_manager.gd      # Autoload: navigation, profile, flags, dialogue/combat routing
+  game_state_manager.gd      # Autoload: navigation, profile, flags, dialogue/combat, save/load
+  save_service.gd            # user:// JSON global meta + slot files
   consequence_engine.gd      # Applies DialogueConsequence mutations
   enums/game_enums.gd        # GameScene + HubContentType
   data/
     player_profile.gd
+    player_chronicle.gd      # Global encountered-event stub
     hub_location_data.gd     # Includes content_type
     hub_location_catalog.gd
     dialogue_script.gd       # Script / Line / Choice / Consequence resources
@@ -71,6 +73,7 @@ ui/overlays/
   shop_overlay.tscn          # Also opened from Market Path
   player_profile_panel.tscn
   chronicle_calendar_panel.tscn
+  save_slots_overlay.tscn    # Exists; retarget to Main Menu File Select (remove from hub)
 
 combat/
   data/ core/ actions/ scenes/ enums/
@@ -104,10 +107,19 @@ combat/
 
 ## Main Menu Architecture
 
+**Target (spec):** Hollow Knight / SMG2 file select — see Save / load below.
+
+**As implemented today (incorrect; to rework):**
 - Canvas `Control` root, centered button panel.
-- **Continue** disabled via `GameStateManager.has_save_data()` (always `false` until save system exists).
+- **Continue** loads most recent slot; **New Game** ignores slot pick.
+- Slots 2–3 gated by `has_completed_first_run`.
+
+**Intended:**
+- Main menu shows **3 always-visible save files** (inline or dedicated File Select overlay).
+- Empty slot → `PlayerProfile.create_default()` → bind `active_save_slot` → hub.
+- Occupied slot → `load_game(slot)` → hub.
 - **Settings / Shop** = instanced overlay scenes; toggled visible, not separate scenes.
-- **New Game** → `PlayerProfile.create_default()` → clears flags → `navigate_to(HOME_HUB)`.
+- No “Continue most recent” shortcut required for the demo.
 
 ---
 
@@ -119,7 +131,8 @@ combat/
   - `DIALOGUE` → `GameStateManager.start_dialogue(trigger_id)`
   - `COMBAT` → `GameStateManager.start_combat(encounter_id)`
   - `SHOP` → show `ShopOverlay`
-- **Persistent overlay (top-right):** Settings, Profile, Chronicle, Main Menu.
+- **Persistent overlay (top-right):** Settings, Profile, Chronicle, Main Menu. **No Save / slot picker** (remove `SaveSlotsOverlay` from hub).
+- **Persistence:** autosave overwrites the **active file only** (hub enter / return-to-hub / Main Menu exit).
 - **Info panel:** Location blurb; after combat, shows one-shot receipt summary.
 
 **Demo hotspots:** Training Grounds, Elder's Pavilion, Mountain Gate (1v1), Outer Slope (1v2), Market Path.
@@ -170,14 +183,33 @@ combat/
 
 `GameStateManager` holds:
 - `player_profile: PlayerProfile`
-- `has_completed_first_run: bool` (unused; gates save slots per manifest)
+- `player_chronicle: PlayerChronicle` — global meta stub (encountered event ids; survives across files)
+- `active_save_slot: int` — file chosen at File Select; all mid-run writes go here
 - `current_scene: GameEnums.GameScene`
 - `active_dialogue_trigger_id` / `active_encounter_id`
 - `pending_combat_encounter_id` (dialogue → combat handoff)
 - `last_combat_receipt: CombatReceipt`
 - `progression_flags: Dictionary`
 
-**Not yet present:** save/load, inventory, NPC relationship metrics, calendar clock / chronicle data (design locked in `system-prompt.md` §6).
+**Remove / stop using for slot UX:** `has_completed_first_run` as a gate that unlocks files 2–3. (Flag may remain in global meta briefly during rework, but must not lock slots.)
+
+**Not yet present:** inventory, NPC relationship metrics, calendar clock / full chronicle UI (design locked in `system-prompt.md` §6).
+
+**Save / load — target (Phase C rework):**
+
+| Piece | Path / role |
+|-------|-------------|
+| `SaveService` | `user://global_meta.json` + `user://saves/slot_N.json` |
+| Slot contents | `PlayerProfile` + `progression_flags` + timestamp (+ run calendar when §6 ships) |
+| Global meta | `PlayerChronicle` only (no slot-lock flag) |
+| Entry UX | Main menu File Select: 3 always-visible files |
+| Empty file | New run bound to that slot |
+| Occupied file | Load that slot |
+| Autosave | Hub enter, return-to-hub, Main Menu exit → **active slot only** |
+| Hub Save UI | **Removed** — no multi-slot picker on hub |
+| Delete file | Deferred past demo (clear slot → empty again) |
+
+**As implemented today (incorrect):** New Game / Continue + hub `SaveSlotsOverlay` + `has_completed_first_run` locking slots 1–2. Replace with File Select above.
 
 ---
 
@@ -216,9 +248,8 @@ All overlays extend `PanelContainer`, share:
 
 ## Pending Infrastructure
 
-- **GitHub:** `~/visual-novel-godot-project` has local git commit; `gh auth login` required before push.
-- **Save slots:** Architecture flag exists; no serialization (`PlayerChronicle` will need global meta alongside slot saves).
-- **Calendar / Chronicle:** Spec’d in §6; no clock, resolver, or event data yet.
+- **File Select rework:** Replace New Game/Continue + hub slot picker + first-run locks with title-screen 3-file select (see Save / load target).
+- **Calendar / Chronicle UI wiring:** Spec’d in §6; clock/resolver not built (PlayerChronicle stub persists now).
 - **Qi cost:** Field reserved on `CombatAction`; not enforced.
 - **Mastery / cooldown:** Designed in spec; not in code.
 - **Portrait art:** Expression keys exist; textures not yet.

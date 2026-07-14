@@ -14,9 +14,10 @@ Condensed roadmap from design sessions. **Combat mechanics detail** is in `syste
 ### Core app shell
 - [x] `GameStateManager` autoload + `GameEnums`
 - [x] `PlayerProfile` resource
-- [x] Main Menu scene (New Game, Continue disabled, Settings/Shop stubs, Quit)
-- [x] Home Hub scene (mountain placeholder, 4 hotspots, persistent overlay)
-- [x] Reusable UI overlays (Settings, Shop, Profile, Chronicle)
+- [x] Main Menu scene (New Game, Continue, Settings/Shop stubs, Quit) — **UX incorrect; File Select rework pending**
+- [x] Home Hub scene (mountain placeholder, hotspots, persistent overlay)
+- [x] Reusable UI overlays (Settings, Shop, Profile, Chronicle; Save slots overlay exists but wrong place/UX)
+- [x] Save / load plumbing — `SaveService`, 3 slot files, global `PlayerChronicle` meta — **behavior incorrect; see rework**
 
 ### Phase A — Core loop connected
 - [x] `DialogueScript` / `DialogueLine` / `DialogueChoice` / `DialogueConsequence` resources
@@ -53,7 +54,7 @@ Condensed roadmap from design sessions. **Combat mechanics detail** is in `syste
 | NPC AoE policy | Fields set; beam AI not queued yet (no NPC beam in demo kit AI) |
 | Settings / Shop | Placeholder text only |
 | Chronicle Calendar | Static placeholder; design locked in `system-prompt.md` §6; no clock/data yet |
-| Save system | `has_save_data()` hardcoded `false` |
+| **Save system** | 🟡 Plumbing exists; **wrong UX**. Need Hollow Knight / SMG2 **File Select** (see rework) |
 | Portraits | Expression keys + color stub; no texture swap yet |
 
 ---
@@ -73,13 +74,21 @@ Condensed roadmap from design sessions. **Combat mechanics detail** is in `syste
 8. ~~**1v2 encounter** — Outer Slope hub + `EncounterCatalog` presets.~~
 
 ### Phase C — Persistence & polish
-9. **Save / load** — Multiple slots locked until `has_completed_first_run` (slot state + global `PlayerChronicle` meta).
+9. 🟡 **Save / load plumbing** shipped, but **File Select rework required** (step 9b below) before treating persistence as done.
+9b. **File Select rework** (priority — correct the incorrect save UX):
+    - [ ] Main menu: replace New Game / Continue with **3 always-visible save files**
+    - [ ] Empty file → new run bound to that slot; occupied → load that slot
+    - [ ] Remove hub Save button + `SaveSlotsOverlay` from hub (retarget overlay to main menu if useful)
+    - [ ] Drop `has_completed_first_run` slot gating; all 3 files available from first launch
+    - [ ] Autosave / mid-run write → **active file only**
+    - [ ] Slot **delete** deferred past demo
 10. **Static art pass** — Mountain background, portraits, expression swapping.
 11. **Shop + inventory** — Item resources, hub/market integration.
 12. **Calendar / Chronicle (demo slice)** — See checklist below; full rules in `system-prompt.md` §6.
 13. **Settings persistence** — Audio/display prefs.
 
 ### Phase D — Post-demo (explicitly deferred)
+- Save file **delete** (clear a slot to start a brand-new run on that file)
 - Perception / Comprehension intel stats
 - Qi cost enforcement, technique mastery, cooldowns
 - Player-controlled allies, co-op, PvP
@@ -112,19 +121,22 @@ Reference `system-prompt.md` §6.
 
 ## Next Session Starter Tasks
 
-Pick up from **Phase C, step 9** unless directed otherwise:
+Pick up from **Phase C, step 9b (File Select rework)** unless directed otherwise:
 
 ```
-1. Save / load slots gated by has_completed_first_run
-2. Persist PlayerProfile + progression_flags (+ stub PlayerChronicle meta)
-3. Enable Main Menu Continue when a slot exists
+1. Main menu File Select: 3 always-visible slots (empty = new, occupied = load)
+2. Remove hub Save / SaveSlotsOverlay; autosave active file only
+3. Drop has_completed_first_run slot locking
+4. Keep PlayerChronicle in global meta; defer slot delete
 ```
 
 **Key files to open:**
+- `scenes/main_menu/main_menu.gd` / `.tscn`
 - `core/game_state_manager.gd`
-- `scenes/main_menu/main_menu.gd`
-- `system-prompt.md` (save-slot notes in Sections 1–3 / architecture)
-- `architecture.md` — Pending Infrastructure
+- `core/save_service.gd`
+- `ui/overlays/save_slots_overlay.gd` / `.tscn` (retarget or replace)
+- `scenes/home_hub/home_hub.gd` / `.tscn` (remove Save)
+- `architecture.md` — Save / load target
 
 ---
 
@@ -184,4 +196,4 @@ gh repo create "Visual-Novel-Godot-Project" --public --source=. --remote=origin 
 
 Copy into next chat:
 
-> **Project:** CultivationGame1 (Godot 4.6) at `~/Documents/GodotGames/cultivation-game-1`. Manifest at `~/visual-novel-godot-project/system-prompt.md`. Phase A loop and Phase B combat (UI, grid, full resolution, 1v1 + 1v2) are built. Next priority: Phase C step 9 — save/load. Read `architecture.md` and `implementation-plan.md` in the manifest repo for codebase layout and task order.
+> **Project:** CultivationGame1 (Godot 4.6) at `~/Documents/GodotGames/cultivation-game-1`. Manifest at `~/visual-novel-godot-project/system-prompt.md`. Phase A–B combat are built; Phase C save plumbing exists but UX is wrong. Next priority: Phase C step 9b — Hollow Knight / SMG2 File Select (3 always-visible files from main menu; no hub slot picker; no first-run slot lock; delete deferred). Then step 10 static art / portraits. Read `architecture.md` and `implementation-plan.md`.

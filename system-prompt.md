@@ -13,7 +13,7 @@
 ## CRITICAL AI SCOPE CONSTRAINTS
 - **Strict Scope Control**: Do not suggest features outside this specification unless explicitly requested. No complex multiplayer, procedural generation, or realtime mechanics.
 - **Asset Minimalism**: All visual assets are static 2D images or basic UI nodes. Character expressions change via instant texture swapping (no animation rigs).
-- **Save System**: Support multiple user save slots. These slots should remain locked until a global system flag (`has_completed_first_run == true`) is met.
+- **Save System**: Hollow Knight / Super Mario Galaxy 2 style **file select**. The main menu always shows **3 save files**. Empty slot → start a new run on that file. Occupied slot → load that file. Each session is bound to one active file; mid-run saves overwrite that file only (autosave). **Do not** gate slots behind `has_completed_first_run`. **Do not** expose a hub multi-slot save picker. Slot **delete** (clear a file to start fresh on that slot) is deferred past the demo.
 
 # ==============================================================================
 
@@ -31,8 +31,9 @@
 # SECTION 3: CORE GAME LOOP & SCENE MACHINE
 The application architecture relies on a master State Manager that switches between four distinct operational scenes:
 
-1. **Main Menu Scene (MainMenu / Settings / Shop)**
+1. **Main Menu Scene (MainMenu / File Select / Settings / Shop)**
    - Canvas-based UI screens for game configuration.
+   - **File Select** is the primary entry: 3 always-visible save files (empty = new run, occupied = continue that file). No separate New Game / Continue of “most recent.”
    - Shop system reads modular item data resources and modifies player inventory state.
 
 2. **Default/Home Hub Scene (The Sect Mountain)**
@@ -235,7 +236,7 @@ CombatantState
 - **Consequence Vectors**: Choices made within the Dialogue Scene must actively mutate:
   - **Player Global Attributes**: (e.g., Cultivation Level, Qi Capacity, Karma).
   - **NPC Status Metrics**: (e.g., Affection Levels, Hostility Factors).
-  - **Global Progression Flags**: (Unlocking historical calendar timelines, branching alternative story events, or unlocking save slots).
+  - **Global Progression Flags**: (Unlocking historical calendar timelines, branching alternative story events).
 
 # ==============================================================================
 
