@@ -9,6 +9,7 @@
 - **Timeline**: 3–4 weeks total development time, working a few hours a week.
 - **Team**: 1 developer (Extensive Java/OOP experience, beginner to Godot 4).
 - **Core Loop**: Main Menu -> Home Hub (Sect Mountain) -> Dialogue/Narrative Branching -> Turn-Based Combat -> Reward & Persistent Meta-Progression.
+- **Game Opening**: New runs start with a scripted **intro sequence** before the hub unlocks: leaving home (player name entry) -> carriage -> bandit ambush (hide = short bad ending / fight = combat tutorial vs a wounded bandit) -> sect arrival + dialogue-driven entrance exam -> hub unlock (`arrived_at_sect` flag). Authoring detail: `implementation-plan.md` -> Intro Sequence Spec. Entrance-exam **minigames** and the dating/relationship system are explicitly **post-demo**; the demo ships only an `escort_disciple_affection` stub counter.
 
 ## CRITICAL AI SCOPE CONSTRAINTS
 - **Strict Scope Control**: Do not suggest features outside this specification unless explicitly requested. No complex multiplayer, procedural generation, or realtime mechanics.
@@ -46,7 +47,9 @@ The application architecture relies on a master State Manager that switches betw
    - Textbox UI for sequential dialogue processing with type-writer text progression.
    - Support for a basic dialogue history/backlog.
    - Branching narrative framework mapping player selections to concrete variable mutations.
-   - Character Portrait Controller supporting fast switching between static facial expressions.
+   - **Player name entry** (intro): a dialogue line type embeds a text input that writes `PlayerProfile.player_name`; all subsequent dialogue text supports `[playerName]` substitution at render time.
+   - **Script chaining**: a dialogue consequence may name a next dialogue script, enabling multi-scene sequences (the intro) without returning to the hub.
+   - Character Portrait Controller supporting fast switching between static facial expressions. **Demo note:** partial textures ship via `PortraitCatalog` (Instructor + Elder wise/stern); missing expressions fall back to closest available art or color stub.
 
 4. **Combat Scene (Turn-Based Arena)**
    - Self-contained arena module triggered exclusively by targeted choices or specific events.

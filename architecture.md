@@ -26,6 +26,8 @@ Main Menu ──File Select (3 slots)──► Home Hub (Sect Mountain)
      └── Settings / Shop overlays (stubs)
 ```
 
+**Planned change (C3/C3b, not built):** empty file → new run routes to the **intro sequence** (`intro_departure` dialogue chain: departure → bandit ambush → tutorial fight → sect arrival), and the hub unlocks only after the `arrived_at_sect` flag is set. See `implementation-plan.md` → Intro Sequence Spec.
+
 **Autoload:** `GameStateManager` persists across all scenes (like a Spring `@Service` singleton).
 
 ---
@@ -150,6 +152,12 @@ combat/
 
 **Demo scripts:** `training_grounds_intro` (linear + 2 choices), `elder_audience` (3-way branch).
 
+**Planned dialogue additions (C3/C3b, not built):**
+- **Name entry line type** (`input_line`): `LineEdit` embedded in the textbox writes `PlayerProfile.player_name`.
+- **`[playerName]` substitution** at line render time.
+- **Dialogue→dialogue chaining:** `next_dialogue_script_id` on `DialogueConsequence` so intro scenes flow without returning to the hub.
+- **Intro scripts:** `intro_departure`, `intro_bandit_ambush`, `intro_hide_ending`, `intro_bandit_victory`, `intro_sect_arrival` (authoring detail in `implementation-plan.md` → Intro Sequence Spec).
+
 ---
 
 ## Combat Module Architecture
@@ -186,7 +194,7 @@ combat/
 - `last_combat_receipt: CombatReceipt`
 - `progression_flags: Dictionary`
 
-**Not yet present:** inventory, NPC relationship metrics, calendar clock / full chronicle UI (design locked in `system-prompt.md` §6).
+**Not yet present:** inventory, NPC relationship metrics, calendar clock / full chronicle UI (design locked in `system-prompt.md` §6), `player_name` + `escort_disciple_affection` on `PlayerProfile` (intro, C3), intro routing (`select_file` → `intro_departure`; `finish_combat` → pending next-dialogue).
 
 **Save / load (Phase C step 9b ✅):**
 
@@ -206,7 +214,7 @@ combat/
 
 ## Combat Interlude & Tutorial Architecture (designed; not built — Phase C3)
 
-Mid-combat dialogue overlay system. Tutorial spar is the first consumer; same mechanism later serves story dialogue / cutscenes inside fights. Detailed checklist in `implementation-plan.md` (step C3).
+Mid-combat dialogue overlay system. The intro's bandit tutorial fight is the first consumer; same mechanism later serves story dialogue / cutscenes inside fights. Detailed checklist in `implementation-plan.md` (step C3).
 
 **Prerequisite (C2):** extract dialogue playback from `scenes/dialogue/dialogue_scene.gd` into:
 | Piece | Role |
@@ -229,7 +237,7 @@ Mid-combat dialogue overlay system. Tutorial spar is the first consumer; same me
 - Interlude scripts are ordinary `DialogueScript` resources in `DialogueCatalog`; consequences flow through `ConsequenceEngine` as usual.
 - Tutorial gating: sidebar palette filter + lock-in disable read from the interlude controller; sidebar stays dumb.
 
-**Tutorial encounter:** `training_spar_tutorial` (Instructor, non-lethal, scripted 3-turn Walk → Punch → Block progression, ends via interlude + receipt setting `completed_combat_tutorial`). Entry: Training Grounds dialogue choice via existing `DialogueConsequence.start_combat_encounter_id`.
+**Tutorial encounter (re-scoped):** `intro_bandit_tutorial` — 1v1 vs a wounded low-HP bandit inside the intro sequence; player palette locked to Walk/Punch/Block; scripted 3-turn Walk → Punch → Block progression via escort-man interludes, then the fight finishes naturally. Non-lethal (escort man intervenes below HP threshold). Win sets `completed_combat_tutorial` + `fought_the_bandits` and bumps the `escort_disciple_affection` stub. Entry: "Fight with the others" choice in `intro_bandit_ambush` via existing `DialogueConsequence.start_combat_encounter_id`; combat receipt routes back to `intro_bandit_victory` dialogue, not the hub. (Supersedes the earlier Training Grounds `training_spar_tutorial` plan.)
 
 ---
 
@@ -268,9 +276,10 @@ All overlays extend `PanelContainer`, share:
 
 ## Pending Infrastructure
 
-- **Consequence readers:** flags/profile are written but nothing reads them — profile→combat stats, flag→hub gating, flag→dialogue branching (Phase C step C1, next up).
+- **Consequence readers:** flags/profile are written but nothing reads them — profile→combat stats, flag→hub gating (incl. `arrived_at_sect` intro gate), flag→dialogue branching (Phase C step C1, next up).
 - **Dialogue playback extraction:** `DialoguePlaybackController` + `DialogueTextboxView` split out of `dialogue_scene.gd` (Phase C step C2).
-- **Combat interludes + tutorial spar:** see section above (Phase C step C3).
+- **Combat interludes + bandit tutorial:** see section above (Phase C step C3).
+- **Intro sequence:** name entry, `[playerName]` substitution, dialogue chaining, new-save routing, intro scripts + art (Phase C steps C3/C3b; spec in `implementation-plan.md` → Intro Sequence Spec).
 - **Shop + inventory:** Overlay is a stub; item resources / buy flow / save payload not built (Phase C step C6 after reorder).
 - **Calendar / Chronicle UI wiring:** Spec’d in §6; clock/resolver not built (PlayerChronicle stub persists now).
 - **Qi cost:** Field reserved on `CombatAction`; not enforced.
