@@ -40,13 +40,15 @@ The application architecture relies on a master State Manager that switches betw
 2. **Default/Home Hub Scene (The Sect Mountain)**
    - Visual Base: Static background image representing the Sect Mountain.
    - Dynamic Overlays: Interactive scene buttons populate dynamically over the mountain based on global calendar or narrative triggers.
-   - Persistent UI Overlay: Global access to Settings, Player Profile/Stats Panel, and the Calendar / Chronicle UI (see Section 6).
+   - Persistent UI Overlay: Global access to Settings, Player Profile/Stats Panel, and the Calendar / Chronicle UI (see Section 6). Overlay chrome stays fixed when the map moves.
    - Time: Most activities advance the day clock via Flow A (activity → duration → resolve → return). See Section 6 for interrupt rules, nested places, and demo time costs (Training Grounds = 1 day; Elder = instant).
+   - **Planned map feel (post-demo / world expansion):** omnidirectional scrolling/panning so the hub reads as a small map, not a single locked postcard. The mountain remains the centerpiece; art and hotspots for forest / road / village surroundings can sit off-frame until the player pans. Even a modest overscan-and-pan pass is desirable before large new zones land. Detail in `implementation-plan.md` → Phase D → Hub omnidirectional scroll.
 
 3. **Dialogue Scene (Visual Novel Mode)**
    - Textbox UI for sequential dialogue processing with type-writer text progression.
    - Support for a basic dialogue history/backlog.
    - Branching narrative framework mapping player selections to concrete variable mutations.
+   - **Implementation split (built):** playback logic lives in `DialoguePlaybackController`; reusable UI in `DialogueTextboxView`; full-screen scene is a thin host. Same textbox can embed over combat (interludes).
    - **Player name entry** (intro): a dialogue line type embeds a text input that writes `PlayerProfile.player_name`; all subsequent dialogue text supports `[playerName]` substitution at render time.
    - **Script chaining**: a dialogue consequence may name a next dialogue script, enabling multi-scene sequences (the intro) without returning to the hub.
    - Character Portrait Controller supporting fast switching between static facial expressions. **Demo note:** partial textures ship via `PortraitCatalog` (Instructor + Elder wise/stern); missing expressions fall back to closest available art or color stub.

@@ -7,6 +7,7 @@ See [system-prompt.md](system-prompt.md) for the full project manifest, architec
 **Session docs (codebase-specific, not in manifest):**
 - [architecture.md](architecture.md) — Godot project layout, patterns, wired vs stub
 - [implementation-plan.md](implementation-plan.md) — completed work, phased roadmap, next tasks
+- [expansion-guide.md](expansion-guide.md) — how to add dialogue, characters, hub spots, techniques, flags
 
 The playable Godot project lives separately at `~/Documents/GodotGames/cultivation-game-1`.
 

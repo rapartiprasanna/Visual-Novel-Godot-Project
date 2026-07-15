@@ -43,21 +43,33 @@ Condensed roadmap from design sessions. **Combat mechanics detail** is in `syste
 - [x] Full resolution engine (step 7) — blocks, interrupts, simultaneous damage, float + default substitutes
 - [x] 1v2 encounter (step 8) — Outer Slope hub + EncounterCatalog
 
+### Phase C groundwork (partial)
+- [x] **C1 consequence readers** — profile→combat stats; flag→hub unlock (`outer_slope` / `trained_morning_drills`); flag→dialogue (`chose_power_path` opening)
+- [x] **C2 dialogue playback extraction** — `DialoguePlaybackController` + `DialogueTextboxView`; `dialogue_scene` thin host
+- [x] **Display / combat HUD polish** — 1280×720 base + `canvas_items`/`expand` stretch; combat sidebar scrolls with Lock In / Retreat pinned visible
+- [x] **C3 combat interludes + bandit tutorial + intro plumbing** — see checklist below
+- [x] **C3b intro content pass** — departure → ambush → tutorial/hide → victory → sect arrival; hub gated on `arrived_at_sect`
+- [x] **C-infra save migration** — `SaveService.migrate` identity for v1
+- [x] **Deferred scene navigation** — `GameStateManager.navigate_to` coalesces `change_scene_to_file` via `call_deferred` (fixes blank game window after combat / intro hide ending)
+
 ---
 
 ## In Progress / Stub 🟡
 
 | Item | Gap |
 |------|-----|
-| Combat arena | ✅ Planning HUD + grid + full resolve + 1v1/1v2 encounters |
-| Combat resolution | ✅ Engine live; visual playback still deferred (Phase D) |
+| Combat arena | ✅ Planning HUD + grid + full resolve + 1v1/1v2; sidebar scroll + pinned Retreat |
+| Combat resolution | ✅ Engine live; visual playback still deferred (C5 minimal / Phase D full) |
+| Display / window | ✅ 1280×720 + stretch (`canvas_items` / `expand`); tweak in Project Settings → Display → Window |
 | NPC AoE policy | Fields set; beam AI not queued yet (no NPC beam in demo kit AI) |
 | Settings / Shop | Placeholder text only |
 | Chronicle Calendar | Static placeholder; design locked in `system-prompt.md` §6; no clock/data yet |
 | **Save system** | ✅ File Select: 3 always-visible files on main menu; active-file autosave; no hub picker; delete deferred |
 | Hub art | ✅ `assets/art/hub/sect_mountain.png` full-bleed; hotspots anchored to landmarks |
-| Portraits | 🟡 Partial: `instructor1`, `sect_elder_wise`, `sect_elder_stern` via `PortraitCatalog`; missing expressions fall back |
-| **Intro sequence** | ❌ Not started — designed in **Intro Sequence Spec** below; consumes C2 + C3; ships as step C3b |
+| **Hub map scroll** | ❌ Planned — omnidirectional pan so the hub feels like a map (world around the mountain); see Phase D / Hub scroll note |
+| Portraits | 🟡 Partial: `instructor1`, `sect_elder_wise`, `sect_elder_stern` via `PortraitCatalog`; intro cast uses color stubs |
+| **Intro sequence** | ✅ Spine playable (name entry, ambush choice, tutorial fight, hide ending, sect arrival → hub) |
+| **Scene transitions** | ✅ Deferred `navigate_to` — no blank embedded window after combat / hide ending |
 
 ---
 
@@ -97,42 +109,42 @@ Completed groundwork:
 
 Remaining Phase C, in order:
 
-#### C1. Consequence readers — make choices matter (small, do first)
+#### C1. Consequence readers — make choices matter ✅
 Flags and profile stats are written but nothing reads them. Close the loop with three readers:
-- [ ] **Profile → combat:** `EncounterCatalog.build_player_from_profile(profile)` replaces the hardcoded `build_player()`. Simple mapping (e.g. `strength = 10 + cultivation_level`, `max_points = 9 + cultivation_level`, karma untouched). Call site: `combat/scenes/combat_arena.gd` `_setup_encounter()`.
-- [ ] **Flags → hub:** `HubLocationCatalog` honors `is_unlocked` from `GameStateManager.has_progression_flag` (e.g. `outer_slope` locked until `trained_morning_drills`). Touch: `core/data/hub_location_catalog.gd`, `scenes/home_hub/home_hub.gd`.
-- [ ] **Flags → dialogue:** at least one branch in `elder_audience` that checks a prior flag (e.g. `chose_power_path` changes the opening line). Requires a small `required_flag` / `blocked_by_flag` field on `DialogueLine` or `DialogueChoice` + filter in the dialogue view. Touch: `core/data/dialogue_line.gd` or `dialogue_choice.gd`, `core/data/dialogue_catalog.gd`, `scenes/dialogue/dialogue_scene.gd`.
+- [x] **Profile → combat:** `EncounterCatalog.build_player_from_profile(profile)` replaces the hardcoded `build_player()`. Simple mapping (e.g. `strength = 10 + cultivation_level`, `max_points = 9 + cultivation_level`, karma untouched). Call site: `combat/scenes/combat_arena.gd` `_setup_encounter()`.
+- [x] **Flags → hub:** `HubLocationCatalog` honors `is_unlocked` from `GameStateManager.has_progression_flag` (e.g. `outer_slope` locked until `trained_morning_drills`). Touch: `core/data/hub_location_catalog.gd`, `scenes/home_hub/home_hub.gd`.
+- [x] **Flags → dialogue:** at least one branch in `elder_audience` that checks a prior flag (e.g. `chose_power_path` changes the opening line). Requires a small `required_flag` / `blocked_by_flag` field on `DialogueLine` or `DialogueChoice` + filter in the dialogue view. Touch: `core/data/dialogue_line.gd` or `dialogue_choice.gd`, `core/data/dialogue_catalog.gd`, `scenes/dialogue/dialogue_scene.gd`.
 
 **Key files:** `combat/data/encounter_catalog.gd`, `core/data/hub_location_catalog.gd`, `core/data/dialogue_catalog.gd`.
 
-#### C2. Dialogue playback extraction (prerequisite for C3)
+#### C2. Dialogue playback extraction (prerequisite for C3) ✅
 Today `scenes/dialogue/dialogue_scene.gd` fuses playback logic with the full-screen scene and hard-calls `GameStateManager.finish_dialogue()`. Extract so the same textbox can be embedded anywhere (combat overlay, future cutscenes):
-- [ ] `DialoguePlaybackController` (`core/dialogue/dialogue_playback_controller.gd`, RefCounted or Node): owns script/line cursor, typewriter counters, choice handling, consequence application. Emits signals only: `line_shown(line)`, `choices_shown(choices)`, `typing_finished`, `playback_finished(script_id)`. **Never** touches `GameStateManager` navigation.
-- [ ] `DialogueTextboxView` (`ui/dialogue/dialogue_textbox_view.tscn` + `.gd`): reusable Control — portrait (via `PortraitCatalog` + color fallback), speaker label, RichTextLabel body, continue hint, choice container, optional backlog. Binds to a controller instance.
-- [ ] Rewrite `scenes/dialogue/dialogue_scene.gd` as a thin host: instantiate view + controller, feed `GameStateManager.get_active_dialogue_script()`, on `playback_finished` call `GameStateManager.finish_dialogue()`. Full-scene behavior unchanged.
-- [ ] Regression check: `training_grounds_intro` and `elder_audience` play identically (typewriter, choices, backlog, consequences, dialogue→combat handoff).
+- [x] `DialoguePlaybackController` (`core/dialogue/dialogue_playback_controller.gd`, RefCounted or Node): owns script/line cursor, typewriter counters, choice handling, consequence application. Emits signals only: `line_shown(line)`, `choices_shown(choices)`, `typing_finished`, `playback_finished(script_id)`. **Never** touches `GameStateManager` navigation.
+- [x] `DialogueTextboxView` (`ui/dialogue/dialogue_textbox_view.tscn` + `.gd`): reusable Control — portrait (via `PortraitCatalog` + color fallback), speaker label, RichTextLabel body, continue hint, choice container, optional backlog. Binds to a controller instance.
+- [x] Rewrite `scenes/dialogue/dialogue_scene.gd` as a thin host: instantiate view + controller, feed `GameStateManager.get_active_dialogue_script()`, on `playback_finished` call `GameStateManager.finish_dialogue()`. Full-scene behavior unchanged.
+- [ ] Regression check: `training_grounds_intro` and `elder_audience` play identically (typewriter, choices, backlog, consequences, dialogue→combat handoff). *(manual in editor)*
 
 **Key files:** `scenes/dialogue/dialogue_scene.gd` (shrinks), new `core/dialogue/` + `ui/dialogue/`.
 
-#### C3. Combat interludes + tutorial fight (uses C2)
+#### C3. Combat interludes + tutorial fight (uses C2) ✅
 Mid-combat dialogue system, designed to be reused for story beats / cutscenes inside any future fight. See **Combat Interlude & Tutorial Checklist** below for full detail.
 
-> **Re-scoped (intro decision):** the tutorial encounter is now the **bandit ambush fight** inside the intro sequence (see **Intro Sequence Spec**), not an optional Training Grounds spar. Same system, same gating fields — different skin and entry point. `training_spar_tutorial` naming below is superseded by `intro_bandit_tutorial`.
+> **Re-scoped (intro decision):** the tutorial encounter is the **bandit ambush fight** inside the intro sequence (see **Intro Sequence Spec**). `training_spar_tutorial` naming is superseded by `intro_bandit_tutorial`.
 
-- [ ] `CombatInterludeTrigger` resource + `InterludeTriggerType` enum
-- [ ] `CombatInterludeController` node in combat arena + `CombatDialogueOverlay` (embeds `DialogueTextboxView`)
-- [ ] Checkpoint signals on `CombatTurnManager` (no changes inside `CombatResolutionEngine`)
-- [ ] Tutorial encounter `intro_bandit_tutorial` (wounded bandit, low HP) launched from intro dialogue via existing `start_combat_encounter_id`
-- [ ] Lock-in gating for tutorial objectives (queue Walk → Punch → Block across scripted turns)
-- [ ] Intro plumbing that lands with C3: player name entry (`LineEdit` step in dialogue), `player_name` on `PlayerProfile`, `[playerName]` text substitution, dialogue→dialogue chaining (`next_dialogue_script_id` consequence), intro→hub unlock flag
+- [x] `CombatInterludeTrigger` resource + `InterludeTriggerType` enum
+- [x] `CombatInterludeController` node in combat arena + `CombatDialogueOverlay` (embeds `DialogueTextboxView`)
+- [x] Checkpoint signals on `CombatTurnManager` (no changes inside `CombatResolutionEngine`)
+- [x] Tutorial encounter `intro_bandit_tutorial` (wounded bandit, low HP) launched from intro dialogue via existing `start_combat_encounter_id`
+- [x] Lock-in gating for tutorial objectives (queue Walk → Punch → Block across scripted turns)
+- [x] Intro plumbing: player name entry (`LineEdit`), `player_name` on `PlayerProfile`, `[playerName]` substitution, `next_dialogue_script_id` chaining, intro→hub unlock flag
 
-#### C3b. Intro content pass (uses C1 + C2 + C3)
-Authoring pass for the opening sequence — mostly writing, not engineering. Full beat-by-beat detail in **Intro Sequence Spec** below.
-- [ ] Scripts: `intro_departure`, `intro_bandit_ambush`, `intro_hide_ending`, `intro_bandit_victory`, `intro_sect_arrival` (+ entrance-exam dialogue)
-- [ ] New saves route to `intro_departure` instead of `HOME_HUB` (one-line change in `GameStateManager.select_file` once chaining exists)
-- [ ] Hub gated behind `arrived_at_sect` flag (C1 reader)
-- [ ] Art: escort man portrait, bandit portrait, carriage/road background, (optional) sect gate background
-- [ ] Affection stub: `escort_disciple_affection` counter or flag on `PlayerProfile` (no relationship system — Phase D)
+#### C3b. Intro content pass (uses C1 + C2 + C3) ✅
+Authoring pass for the opening sequence. Full beat-by-beat detail in **Intro Sequence Spec** below.
+- [x] Scripts: `intro_departure`, `intro_bandit_ambush`, `intro_hide_ending`, `intro_bandit_victory`, `intro_sect_arrival` (+ dialogue-driven entrance exam)
+- [x] New saves route to `intro_departure` instead of `HOME_HUB`
+- [x] Hub gated behind `arrived_at_sect` flag
+- [ ] Art: escort man portrait, bandit portrait, carriage/road background, (optional) sect gate background *(color stubs for now)*
+- [x] Affection stub: `escort_disciple_affection` on `PlayerProfile`
 
 #### C4. Calendar / Chronicle demo slice (was step 12 — **promoted**)
 The retention hook; must ship in demo. See Calendar / Chronicle Checklist below; full rules in `system-prompt.md` §6. Includes one missable timed event that records to `PlayerChronicle` and shows as a faded future marker on a second run.
@@ -154,7 +166,7 @@ Not the full wall-clock scrub — just enough motion to sell the timeline model:
 #### C7. Settings persistence — audio/display prefs.
 
 #### C-infra (anytime, cheap): save migration scaffold
-- [ ] `SaveService.migrate(data: Dictionary) -> Dictionary` keyed on `version`; identity for v1. All future payload additions (inventory, calendar state) go through it.
+- [x] `SaveService.migrate(data: Dictionary) -> Dictionary` keyed on `version`; identity for v1. All future payload additions (inventory, calendar state) go through it.
 
 ### Phase D — Post-demo (explicitly deferred)
 - **Entrance-exam minigames** (1–2 bespoke minigames at the sect exam; demo uses dialogue-driven exam instead — see Intro Sequence Spec)
@@ -174,6 +186,18 @@ Not the full wall-clock scrub — just enough motion to sell the timeline model:
 - Combat regression test suite expansion (seed tests land with C3; broaden before combat features grow)
 - `GameStateManager` service split (`RunSessionState` / `SceneRouter` / `PersistenceService` / `ChronicleService`) — do **before** post-demo content expansion
 - Catalog migration to `.tres` / data files (`DialogueCatalog`, `HubLocationCatalog`, `EncounterCatalog`) — do **before** calendar content volume grows
+- **Hub omnidirectional map scroll** (see note below) — lands when surrounding-world art/locations expand; can ship a light pan even before new zones exist
+
+#### Hub omnidirectional scroll (planned — Phase D / world-expansion polish)
+
+**Goal:** the Home Hub should feel like a **map you can move around**, not a single full-bleed postcard. Pan in all directions (drag / edge pan / WASD or arrows) within a larger canvas so players sense space around the sect mountain — even a modest overscan feels better than a locked frame. Later, forest / village / road landmarks around the mountain become reachable hotspots on the same scrollable layer.
+
+**Design notes (not built):**
+- Keep hotspots as anchored `%` positions on a **map root** larger than the viewport (e.g. `Control` or `Node2D` map with camera / scroll offsets).
+- Persistent overlay (Settings / Profile / Chronicle / Main Menu) stays **fixed on a CanvasLayer** — it must not scroll with the map.
+- Clamp scroll to map bounds; optional gentle inertia; optional “center on mountain” reset.
+- Current `sect_mountain.png` can overscan slightly first; expand art + `HubLocationCatalog` anchors when new surroundings are authored.
+- **Not blocking C3–C7.** Schedule when adding world around the mountain, or as a small feel-pass after the intro unlocks the hub.
 
 ---
 
@@ -187,45 +211,27 @@ Goal: pause combat at defined checkpoints, play dialogue over the arena, resume.
 - **Data-driven.** Interludes are resources attached to an encounter, not code in the arena script. A story fight and a tutorial differ only in trigger data + script content.
 
 ### Data layer
-- [ ] `InterludeTriggerType` enum (`combat/enums/combat_enums.gd` or new file):
+- [x] `InterludeTriggerType` enum (`combat/enums/combat_enums.gd`):
       `COMBAT_START`, `PLANNING_START` (turn N), `AFTER_RESOLVE` (turn N), `HP_BELOW` (combatant %, checked after resolve), `COMBATANT_DEFEATED`, `PLAYER_ACTION_QUEUED` (action id, for tutorial nudges), `COMBAT_END`
-- [ ] `CombatInterludeTrigger` resource (`combat/data/combat_interlude_trigger.gd`):
-      `trigger_type`, `turn_number`, `combatant_id`, `hp_ratio_threshold`, `action_id`, `dialogue_script_id`, `once: bool = true`, `consumed` (runtime), plus tutorial-gating fields below
-- [ ] `EncounterCatalog` gains per-encounter interlude list: `get_interludes(encounter_id) -> Array[CombatInterludeTrigger]` (empty for existing encounters)
-- [ ] Interlude dialogue scripts live in `DialogueCatalog` like any other script (same `DialogueScript` resources — reuse, no new format)
+- [x] `CombatInterludeTrigger` resource (`combat/data/combat_interlude_trigger.gd`)
+- [x] `EncounterCatalog.get_interludes(encounter_id)` (empty for existing encounters)
+- [x] Interlude dialogue scripts in `DialogueCatalog`
 
 ### Runtime layer
-- [ ] `CombatTurnManager` additions (signals only, no behavior change):
-      `turn_number: int`, signals `planning_started(turn_number)`, `resolution_finished(turn_number)`, `combatant_defeated(combatant_id)`, and `player_action_queued(action_id)` emitted from `queue_action_for_player`
-- [ ] `CombatInterludeController` (node in `combat_arena.tscn`, script `combat/ui/combat_interlude_controller.gd`):
-      - Loads triggers for the active encounter; subscribes to turn manager signals
-      - On match: sets arena input to blocked (planning UI disabled, grid clicks ignored), shows overlay, plays script via `DialoguePlaybackController`
-      - On `playback_finished`: hides overlay, re-enables input, marks trigger consumed
-      - Consequences inside interlude scripts flow through `ConsequenceEngine` as usual (works today); combat-state mutations from dialogue are **out of scope** for demo
-- [ ] `CombatDialogueOverlay` (`combat/ui/combat_dialogue_overlay.tscn`): CanvasLayer + dim ColorRect + embedded `DialogueTextboxView`; no backlog needed in demo
-- [ ] Pause semantics: demo combat is logic-instant, so "pause" = deferring the next phase transition until the overlay closes. `COMBAT_END` triggers defer the `finish_combat` receipt return. When C5 playback lands, the controller also gates the next playback step.
+- [x] `CombatTurnManager`: `turn_number` + checkpoint signals + `continue_after_resolution()` / `force_combat_finished()`
+- [x] `CombatInterludeController` (`combat/ui/combat_interlude_controller.gd`)
+- [x] `CombatDialogueOverlay` (`combat/ui/combat_dialogue_overlay.tscn`)
+- [x] Pause semantics: defer next phase / `finish_combat` until overlay closes
 
-### Bandit tutorial fight (first consumer — re-skinned from training spar per intro decision)
-- [ ] Encounter `intro_bandit_tutorial` in `EncounterCatalog`: 1v1 vs a **wounded bandit** (reduced HP, low damage), player from profile (C1). Player palette = Walk / Punch / Block only; bandit AI = Walk / Punch / Block (existing AI kit). Non-lethal for the player: on player HP ≤ threshold the escort man intervenes via interlude + scripted neutral receipt, never a defeat screen
-- [ ] Tutorial gating fields on `CombatInterludeTrigger` (used only by tutorial):
-      `required_action_ids: Array[String]` (lock-in disabled until these are queued this turn), `allowed_palette_action_ids` (sidebar shows only these)
-- [ ] `CombatPlanningSidebar` support: palette filtering + lock-in disable with hint text (reads gating state from the interlude controller; sidebar stays dumb)
-- [ ] Scripted flow (3 short turns), tutorial lines voiced by the **escort man** shouting from the sidelines:
-      1. `COMBAT_START` interlude — explains points + Walk; palette = Walk only; lock-in requires a queued Walk
-      2. Turn 2 `PLANNING_START` — explains windup + Punch; palette = Walk/Punch; requires Punch queued
-      3. Turn 3 `PLANNING_START` — explains Block merging + defensive default; palette = Walk/Punch/Block; requires Block queued
-      4. `AFTER_RESOLVE` turn 3 — gating lifts; fight runs to natural finish (bandit is wounded, so 1–2 more turns)
-      5. `COMBAT_END` — wrap-up interlude, receipt (`player_won = true`, small reward, sets flags `completed_combat_tutorial` + `fought_the_bandits`, bumps `escort_disciple_affection`)
-- [ ] Entry point: "Fight with the others" choice in `intro_bandit_ambush` using existing `DialogueConsequence.start_combat_encounter_id` (see Intro Sequence Spec)
-- [ ] Beam/Blink deliberately **not** tutorialized — discovery in real encounters; tooltip text on palette buttons is enough
+### Bandit tutorial fight
+- [x] Encounter `intro_bandit_tutorial` + wounded bandit + Walk/Punch/Block palette + non-lethal HP rescue
+- [x] Tutorial gating fields + sidebar palette filter / lock-in hint
+- [x] Scripted 3-turn Walk → Punch → Block flow + free play + `COMBAT_END` wrap-up
+- [x] Entry from `intro_bandit_ambush` "Fight with the others"; return → `intro_bandit_victory`
+- [x] Beam/Blink not tutorialized
 
-### Reuse path (post-demo, no rework expected)
-- Story beat mid-boss-fight = `HP_BELOW` trigger + normal `DialogueScript` (works with zero new code)
-- Cutscenes with camera/animation = new overlay variant behind the same controller checkpoints
-- Mid-playback stingers = same triggers gated on C5 playback step boundaries
-
-### Combat regression seed tests (land alongside C3, guards the signal additions)
-- [ ] Headless test script(s) under `tests/combat/`: block-chain merge, windup interrupt cancel, walk collision retry, simultaneous damage group — pinned RNG seed
+### Combat regression seed tests
+- [x] Headless seed under `tests/combat/combat_resolution_seed_test.gd` (block-chain merge + walk path); expand later
 
 ---
 
@@ -284,16 +290,17 @@ Full spec in **Bandit tutorial fight** checklist above (C3). Summary: 1v1 vs a w
 5. Closing consequence: set flag `arrived_at_sect`, route to `HOME_HUB`, autosave. Hub hotspots are gated on this flag (C1 reader), so loading a mid-intro file can never skip to the hub.
 
 ### Engineering deltas required (land with C3 unless noted)
-| Delta | Touch | Size |
-|-------|-------|------|
-| `player_name` on `PlayerProfile` (+ save payload; goes through `SaveService.migrate` when C-infra lands) | `core/data/player_profile.gd`, `core/save_service.gd` | XS |
-| Name-entry dialogue line type (`input_line`) + `LineEdit` in textbox view | `core/data/dialogue_line.gd`, dialogue view (post-C2: `DialogueTextboxView`) | S |
-| `[playerName]` substitution pass at line render | dialogue playback (post-C2: `DialoguePlaybackController`) | XS |
-| `next_dialogue_script_id` on `DialogueConsequence` (dialogue→dialogue chaining) | `core/data/dialogue_consequence.gd`, `ConsequenceEngine`, `GameStateManager` | S |
-| New saves route to `intro_departure` instead of `HOME_HUB` | `GameStateManager.select_file` | XS |
-| Combat→dialogue return routing (receipt → `intro_bandit_victory` instead of hub) | `GameStateManager.finish_combat` (respect pending next-dialogue when set) | S |
-| `escort_disciple_affection` counter on `PlayerProfile` | `core/data/player_profile.gd`, `ConsequenceEngine` delta support | XS |
-| Hub gating on `arrived_at_sect` | C1 flag reader (already planned) | — |
+| Delta | Touch | Size | Status |
+|-------|-------|------|--------|
+| `player_name` on `PlayerProfile` (+ save payload; `SaveService.migrate`) | `core/data/player_profile.gd`, `core/save_service.gd` | XS | ✅ |
+| Name-entry (`is_name_input`) + `LineEdit` in textbox view | `dialogue_line.gd`, `DialogueTextboxView` | S | ✅ |
+| `[playerName]` substitution | `DialoguePlaybackController` | XS | ✅ |
+| `next_dialogue_script_id` chaining | `dialogue_consequence.gd`, `ConsequenceEngine`, `GameStateManager` | S | ✅ |
+| New saves → `intro_departure` | `GameStateManager.select_file` | XS | ✅ |
+| Combat→dialogue return | `GameStateManager.finish_combat` | S | ✅ |
+| `escort_disciple_affection` | `PlayerProfile`, `ConsequenceEngine` | XS | ✅ |
+| Hub gating on `arrived_at_sect` | `home_hub.gd` + file-select routing | — | ✅ |
+| Deferred scene navigation | `GameStateManager.navigate_to` | XS | ✅ |
 
 ---
 
@@ -317,20 +324,21 @@ Reference `system-prompt.md` §6.
 
 ## Next Session Starter Tasks
 
-Pick up from **Phase C, step C1 (consequence readers)** unless directed otherwise:
+Pick up from **Phase C, step C4 (Calendar / Chronicle demo slice)** unless directed otherwise:
 
 ```
-1. EncounterCatalog.build_player_from_profile — combat player stats from PlayerProfile
-2. Hub location gating via progression flags (is_unlocked reader)
-3. One flag-aware branch in elder_audience dialogue
+1. Run calendar state on the active save (day, activity log, consumed event ids)
+2. MasterChronicle catalog entry for ≥1 timed story event
+3. ActivityResolver look-ahead collapse; Training Grounds = 1 day; Elder instant
+4. Calendar UI: this-run past vs PlayerChronicle future markers (faded)
 ```
 
 **Key files to open:**
-- `combat/data/encounter_catalog.gd`
-- `core/data/hub_location_catalog.gd` / `scenes/home_hub/home_hub.gd`
-- `core/data/dialogue_catalog.gd` / `core/data/dialogue_line.gd`
+- `system-prompt.md` §6 + Calendar / Chronicle Checklist in this file
+- `core/save_service.gd` (payload via `migrate`), `ui/overlays/chronicle_calendar_panel.*`
+- `scenes/home_hub/home_hub.gd`, hub location time costs
 
-Then proceed C2 (dialogue playback extraction) → C3 (combat interludes + bandit tutorial + intro plumbing) → C3b (intro content pass, see Intro Sequence Spec) → C4 (calendar slice) → C5 (minimal playback) → C6 (shop) → C7 (settings).
+Then proceed C5 (minimal playback) → C6 (shop) → C7 (settings).
 
 ---
 
@@ -348,6 +356,7 @@ Reference `system-prompt.md` §4.11 for algorithm.
 - [x] Combat UI scene separate from `CombatTurnManager` (data/view split)
 - [x] Blink targeting mode with Chebyshev range overlay
 - [x] 1v2 encounter preset (`EncounterCatalog` + Outer Slope hub)
+- [x] Combat sidebar scroll + Lock In / Retreat pinned (no more clipped Retreat on short windows)
 - [ ] NPC beam AI that respects `friendly_fire_policy` (optional polish; NPCs currently Walk/Punch only)
 
 ---
@@ -360,8 +369,8 @@ Reference `system-prompt.md` §4.11 for algorithm.
 - [x] Dialogue backlog/history panel
 - [x] Character portrait controller — `PortraitCatalog` + TextureRect swap (partial art; color stub fallback)
 - [ ] NPC affection / hostility metrics (deferred; demo ships only `escort_disciple_affection` stub counter via intro)
-- [ ] Player name entry + `[playerName]` substitution (intro, lands with C3)
-- [ ] Dialogue→dialogue chaining via `next_dialogue_script_id` (intro, lands with C3)
+- [x] Player name entry + `[playerName]` substitution
+- [x] Dialogue→dialogue chaining via `next_dialogue_script_id`
 
 ---
 
@@ -369,13 +378,15 @@ Reference `system-prompt.md` §4.11 for algorithm.
 
 | Location ID | Intended content | Time cost | Status |
 |-------------|------------------|-----------|--------|
-| `training_grounds` | Tutorial dialogue | **1 day** (when calendar ships) | ✅ content; ⏳ day cost pending §6 |
+| `training_grounds` | Drill dialogue | **1 day** (when calendar ships) | ✅ content; ⏳ day cost pending §6 |
 | `elders_pavilion` | Branching narrative choice | **Instant** | ✅ |
 | `mountain_gate` | 1v1 combat encounter + receipt | TBD with calendar | ✅ |
 | `outer_slope` | 1v2 combat encounter + receipt | TBD with calendar | ✅ |
 | `market_path` | Shop overlay | TBD with calendar | 🟡 Opens stub overlay |
 
-**Note:** the combat tutorial is **no longer** a Training Grounds activity — it lives in the intro sequence (`intro_bandit_tutorial`, see Intro Sequence Spec). Training Grounds keeps its existing `training_grounds_intro` dialogue. The hub itself is gated behind the `arrived_at_sect` flag; new saves start at `intro_departure`.
+**Note:** combat tutorial lives in the intro (`intro_bandit_tutorial`). Training Grounds keeps `training_grounds_intro`. Hub unlocks after `arrived_at_sect`; new saves start at `intro_departure`.
+
+**Planned UX:** omnidirectional hub map scroll (pan around / beyond the mountain) when surrounding world content lands — see Phase D → Hub omnidirectional scroll.
 
 ---
 
@@ -394,4 +405,4 @@ gh repo create "Visual-Novel-Godot-Project" --public --source=. --remote=origin 
 
 Copy into next chat:
 
-> **Project:** CultivationGame1 (Godot 4.6) at `~/Documents/GodotGames/cultivation-game-1`. Manifest at `~/visual-novel-godot-project/system-prompt.md`. Phase A–B combat, File Select save (9b), hub mountain art, and partial portraits (Instructor + Elder wise/stern) are built. Phase C was **reordered** after an architecture review: next priority is **C1 — consequence readers** (profile→combat stats, flag→hub gating, flag→dialogue branch), then C2 dialogue playback extraction, C3 combat interludes + **bandit tutorial fight** + intro plumbing (name entry, `[playerName]` substitution, dialogue chaining), C3b **intro content pass** (departure → bandit ambush → tutorial → sect arrival; new saves start here, hub gated on `arrived_at_sect`), C4 calendar slice, C5 minimal resolution playback, C6 shop, C7 settings. Entrance-exam minigames and the dating system are Phase D. Read `architecture.md` and `implementation-plan.md` (Phase C section + **Intro Sequence Spec** + Combat Interlude & Tutorial Checklist).
+> **Project:** CultivationGame1 (Godot 4.6) at `~/Documents/GodotGames/cultivation-game-1`. Manifest at `~/visual-novel-godot-project/system-prompt.md`. Phase A–B combat, File Select, C1–C3b intro spine, and deferred scene navigation (`navigate_to`) are built. Next: **C4 calendar / chronicle demo slice**, then C5 minimal combat playback, C6 shop, C7 settings. Phase D: hub map scroll, entrance-exam minigames, dating. Read `architecture.md` and `implementation-plan.md` (Phase C + Calendar checklist).
