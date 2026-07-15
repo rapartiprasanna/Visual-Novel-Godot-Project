@@ -14,10 +14,10 @@ Condensed roadmap from design sessions. **Combat mechanics detail** is in `syste
 ### Core app shell
 - [x] `GameStateManager` autoload + `GameEnums`
 - [x] `PlayerProfile` resource
-- [x] Main Menu scene (New Game, Continue, Settings/Shop stubs, Quit) — **UX incorrect; File Select rework pending**
-- [x] Home Hub scene (mountain placeholder, hotspots, persistent overlay)
-- [x] Reusable UI overlays (Settings, Shop, Profile, Chronicle; Save slots overlay exists but wrong place/UX)
-- [x] Save / load plumbing — `SaveService`, 3 slot files, global `PlayerChronicle` meta — **behavior incorrect; see rework**
+- [x] Main Menu scene (File Select ×3, Settings/Shop stubs, Quit)
+- [x] Home Hub scene (`sect_mountain.png` background, hotspots, persistent overlay)
+- [x] Reusable UI overlays (Settings, Shop, Profile, Chronicle; File Select panel on main menu)
+- [x] Save / load — `SaveService`, 3 file slots, global `PlayerChronicle` meta, File Select entry
 
 ### Phase A — Core loop connected
 - [x] `DialogueScript` / `DialogueLine` / `DialogueChoice` / `DialogueConsequence` resources
@@ -54,8 +54,9 @@ Condensed roadmap from design sessions. **Combat mechanics detail** is in `syste
 | NPC AoE policy | Fields set; beam AI not queued yet (no NPC beam in demo kit AI) |
 | Settings / Shop | Placeholder text only |
 | Chronicle Calendar | Static placeholder; design locked in `system-prompt.md` §6; no clock/data yet |
-| **Save system** | 🟡 Plumbing exists; **wrong UX**. Need Hollow Knight / SMG2 **File Select** (see rework) |
-| Portraits | Expression keys + color stub; no texture swap yet |
+| **Save system** | ✅ File Select: 3 always-visible files on main menu; active-file autosave; no hub picker; delete deferred |
+| Hub art | ✅ `assets/art/hub/sect_mountain.png` full-bleed; hotspots anchored to landmarks |
+| Portraits | 🟡 Partial: `instructor1`, `sect_elder_wise`, `sect_elder_stern` via `PortraitCatalog`; missing expressions fall back |
 
 ---
 
@@ -73,21 +74,77 @@ Condensed roadmap from design sessions. **Combat mechanics detail** is in `syste
 7. ~~**Full resolution pass** — Floating points, default behaviors, interrupts, block mitigation.~~
 8. ~~**1v2 encounter** — Outer Slope hub + `EncounterCatalog` presets.~~
 
-### Phase C — Persistence & polish
-9. 🟡 **Save / load plumbing** shipped, but **File Select rework required** (step 9b below) before treating persistence as done.
-9b. **File Select rework** (priority — correct the incorrect save UX):
-    - [ ] Main menu: replace New Game / Continue with **3 always-visible save files**
-    - [ ] Empty file → new run bound to that slot; occupied → load that slot
-    - [ ] Remove hub Save button + `SaveSlotsOverlay` from hub (retarget overlay to main menu if useful)
-    - [ ] Drop `has_completed_first_run` slot gating; all 3 files available from first launch
-    - [ ] Autosave / mid-run write → **active file only**
-    - [ ] Slot **delete** deferred past demo
-10. **Static art pass** — Mountain background, portraits, expression swapping.
-11. **Shop + inventory** — Item resources, hub/market integration.
-12. **Calendar / Chronicle (demo slice)** — See checklist below; full rules in `system-prompt.md` §6.
-13. **Settings persistence** — Audio/display prefs.
+### Phase C — Persistence & polish (REORDERED)
+
+**Rationale for reorder (architecture review):** the demo's unique value is (1) calendar-driven loop and (2) timeline combat that players can actually learn. Old order shipped shop/settings before either. New order closes the consequence loop first, builds the tutorial + interlude system on an extracted dialogue component, then calendar, then economy/settings.
+
+Completed groundwork:
+9. 🟡 ~~**Save / load plumbing**~~ → corrected by 9b.
+9b. ✅ **File Select rework**:
+    - [x] Main menu: replace New Game / Continue with **3 always-visible save files**
+    - [x] Empty file → new run bound to that slot; occupied → load that slot
+    - [x] Remove hub Save button + `SaveSlotsOverlay` from hub (panel retargeted to main menu File Select)
+    - [x] Drop `has_completed_first_run` slot gating; all 3 files available from first launch
+    - [x] Autosave / mid-run write → **active file only**
+    - [x] Slot **delete** deferred past demo
+10. 🟡 **Static art pass**
+    - [x] Mountain hub background (`assets/art/hub/sect_mountain.png`) + hotspot re-anchors
+    - [x] Partial portraits wired via `PortraitCatalog` + dialogue texture swap
+      - Instructor → `instructor1.jpeg` (all expressions until variants exist)
+      - Sect Elder → `sect_elder_wise` / `sect_elder_stern` (`neutral` falls back to wise)
+    - [ ] Optional later: Instructor expression variants + Elder `neutral` dedicated art
+
+Remaining Phase C, in order:
+
+#### C1. Consequence readers — make choices matter (small, do first)
+Flags and profile stats are written but nothing reads them. Close the loop with three readers:
+- [ ] **Profile → combat:** `EncounterCatalog.build_player_from_profile(profile)` replaces the hardcoded `build_player()`. Simple mapping (e.g. `strength = 10 + cultivation_level`, `max_points = 9 + cultivation_level`, karma untouched). Call site: `combat/scenes/combat_arena.gd` `_setup_encounter()`.
+- [ ] **Flags → hub:** `HubLocationCatalog` honors `is_unlocked` from `GameStateManager.has_progression_flag` (e.g. `outer_slope` locked until `trained_morning_drills`). Touch: `core/data/hub_location_catalog.gd`, `scenes/home_hub/home_hub.gd`.
+- [ ] **Flags → dialogue:** at least one branch in `elder_audience` that checks a prior flag (e.g. `chose_power_path` changes the opening line). Requires a small `required_flag` / `blocked_by_flag` field on `DialogueLine` or `DialogueChoice` + filter in the dialogue view. Touch: `core/data/dialogue_line.gd` or `dialogue_choice.gd`, `core/data/dialogue_catalog.gd`, `scenes/dialogue/dialogue_scene.gd`.
+
+**Key files:** `combat/data/encounter_catalog.gd`, `core/data/hub_location_catalog.gd`, `core/data/dialogue_catalog.gd`.
+
+#### C2. Dialogue playback extraction (prerequisite for C3)
+Today `scenes/dialogue/dialogue_scene.gd` fuses playback logic with the full-screen scene and hard-calls `GameStateManager.finish_dialogue()`. Extract so the same textbox can be embedded anywhere (combat overlay, future cutscenes):
+- [ ] `DialoguePlaybackController` (`core/dialogue/dialogue_playback_controller.gd`, RefCounted or Node): owns script/line cursor, typewriter counters, choice handling, consequence application. Emits signals only: `line_shown(line)`, `choices_shown(choices)`, `typing_finished`, `playback_finished(script_id)`. **Never** touches `GameStateManager` navigation.
+- [ ] `DialogueTextboxView` (`ui/dialogue/dialogue_textbox_view.tscn` + `.gd`): reusable Control — portrait (via `PortraitCatalog` + color fallback), speaker label, RichTextLabel body, continue hint, choice container, optional backlog. Binds to a controller instance.
+- [ ] Rewrite `scenes/dialogue/dialogue_scene.gd` as a thin host: instantiate view + controller, feed `GameStateManager.get_active_dialogue_script()`, on `playback_finished` call `GameStateManager.finish_dialogue()`. Full-scene behavior unchanged.
+- [ ] Regression check: `training_grounds_intro` and `elder_audience` play identically (typewriter, choices, backlog, consequences, dialogue→combat handoff).
+
+**Key files:** `scenes/dialogue/dialogue_scene.gd` (shrinks), new `core/dialogue/` + `ui/dialogue/`.
+
+#### C3. Combat interludes + tutorial spar (uses C2)
+Mid-combat dialogue system, designed to be reused for story beats / cutscenes inside any future fight. See **Combat Interlude & Tutorial Checklist** below for full detail.
+- [ ] `CombatInterludeTrigger` resource + `InterludeTriggerType` enum
+- [ ] `CombatInterludeController` node in combat arena + `CombatDialogueOverlay` (embeds `DialogueTextboxView`)
+- [ ] Checkpoint signals on `CombatTurnManager` (no changes inside `CombatResolutionEngine`)
+- [ ] Tutorial spar encounter `training_spar_tutorial` (non-lethal, Instructor) launched from Training Grounds dialogue via existing `start_combat_encounter_id`
+- [ ] Lock-in gating for tutorial objectives (queue Walk → Punch → Block across scripted turns)
+
+#### C4. Calendar / Chronicle demo slice (was step 12 — **promoted**)
+The retention hook; must ship in demo. See Calendar / Chronicle Checklist below; full rules in `system-prompt.md` §6. Includes one missable timed event that records to `PlayerChronicle` and shows as a faded future marker on a second run.
+
+#### C5. Minimal combat resolution playback (pulled forward from Phase D, minimal scope)
+Not the full wall-clock scrub — just enough motion to sell the timeline model:
+- [ ] Tween unit markers tile-by-tile on Walk/Blink (fixed short per-step duration, not wall-clock accurate)
+- [ ] Brief visual flash on block windows and interrupt cancels
+- [ ] Combat log lines highlighted as their step plays
+- Interlude checkpoints (C3) must be respected between playback steps so tutorials/cutscenes can pause playback later.
+
+**Key files:** `combat/ui/combat_grid_view.gd`, `combat/scenes/combat_arena.gd`; resolution engine stays logic-instant (playback is a replay of the log/timeline, keeping data/view split).
+
+#### C6. Shop + inventory (was step 11 — demoted behind loop-critical work)
+- [ ] Item resources + inventory on `PlayerProfile` (or dedicated inventory state)
+- [ ] Wire Market Path / Shop overlay to real stock + buy flow
+- [ ] Persist inventory in save slot payload (bump `SAVE_VERSION`, see C7-infra)
+
+#### C7. Settings persistence — audio/display prefs.
+
+#### C-infra (anytime, cheap): save migration scaffold
+- [ ] `SaveService.migrate(data: Dictionary) -> Dictionary` keyed on `version`; identity for v1. All future payload additions (inventory, calendar state) go through it.
 
 ### Phase D — Post-demo (explicitly deferred)
+- Additional portrait expression variants (Instructor stern/neutral split, Elder neutral, etc.)
 - Save file **delete** (clear a slot to start a brand-new run on that file)
 - Perception / Comprehension intel stats
 - Qi cost enforcement, technique mastery, cooldowns
@@ -97,11 +154,66 @@ Condensed roadmap from design sessions. **Combat mechanics detail** is in `syste
 - Rich activity tables / sub-profession minigames / village hubs / travel random tables
 - Forced main events (auto hub + break seclusion)
 - Year-scale calendar chrome (large `D` seclusion still supported by engine)
-- Combat resolution **visual playback** (tween markers along path / wall-clock timeline scrub)
+- **Full** wall-clock resolution playback / timeline scrub (minimal tween pass moved into demo as C5)
+- Story cutscenes mid-combat with camera moves / scripted enemy actions (interlude system from C3 is the foundation)
+- Combat regression test suite expansion (seed tests land with C3; broaden before combat features grow)
+- `GameStateManager` service split (`RunSessionState` / `SceneRouter` / `PersistenceService` / `ChronicleService`) — do **before** post-demo content expansion
+- Catalog migration to `.tres` / data files (`DialogueCatalog`, `HubLocationCatalog`, `EncounterCatalog`) — do **before** calendar content volume grows
 
 ---
 
-## Calendar / Chronicle Checklist (Phase C, step 12)
+## Combat Interlude & Tutorial Checklist (Phase C, step C3)
+
+Goal: pause combat at defined checkpoints, play dialogue over the arena, resume. The tutorial spar is the first consumer; the same system later drives story dialogue / cutscenes mid-fight.
+
+### Design principles
+- **Combat logic never knows about dialogue.** `CombatResolutionEngine` stays untouched. Pauses happen only at checkpoints that `CombatTurnManager` / the arena scene already control (phase boundaries, and later, playback step boundaries in C5).
+- **Overlay, not scene change.** Combat state lives in the arena scene tree; navigating to the dialogue scene would destroy it. The interlude renders `DialogueTextboxView` (from C2) in a CanvasLayer above the arena.
+- **Data-driven.** Interludes are resources attached to an encounter, not code in the arena script. A story fight and a tutorial differ only in trigger data + script content.
+
+### Data layer
+- [ ] `InterludeTriggerType` enum (`combat/enums/combat_enums.gd` or new file):
+      `COMBAT_START`, `PLANNING_START` (turn N), `AFTER_RESOLVE` (turn N), `HP_BELOW` (combatant %, checked after resolve), `COMBATANT_DEFEATED`, `PLAYER_ACTION_QUEUED` (action id, for tutorial nudges), `COMBAT_END`
+- [ ] `CombatInterludeTrigger` resource (`combat/data/combat_interlude_trigger.gd`):
+      `trigger_type`, `turn_number`, `combatant_id`, `hp_ratio_threshold`, `action_id`, `dialogue_script_id`, `once: bool = true`, `consumed` (runtime), plus tutorial-gating fields below
+- [ ] `EncounterCatalog` gains per-encounter interlude list: `get_interludes(encounter_id) -> Array[CombatInterludeTrigger]` (empty for existing encounters)
+- [ ] Interlude dialogue scripts live in `DialogueCatalog` like any other script (same `DialogueScript` resources — reuse, no new format)
+
+### Runtime layer
+- [ ] `CombatTurnManager` additions (signals only, no behavior change):
+      `turn_number: int`, signals `planning_started(turn_number)`, `resolution_finished(turn_number)`, `combatant_defeated(combatant_id)`, and `player_action_queued(action_id)` emitted from `queue_action_for_player`
+- [ ] `CombatInterludeController` (node in `combat_arena.tscn`, script `combat/ui/combat_interlude_controller.gd`):
+      - Loads triggers for the active encounter; subscribes to turn manager signals
+      - On match: sets arena input to blocked (planning UI disabled, grid clicks ignored), shows overlay, plays script via `DialoguePlaybackController`
+      - On `playback_finished`: hides overlay, re-enables input, marks trigger consumed
+      - Consequences inside interlude scripts flow through `ConsequenceEngine` as usual (works today); combat-state mutations from dialogue are **out of scope** for demo
+- [ ] `CombatDialogueOverlay` (`combat/ui/combat_dialogue_overlay.tscn`): CanvasLayer + dim ColorRect + embedded `DialogueTextboxView`; no backlog needed in demo
+- [ ] Pause semantics: demo combat is logic-instant, so "pause" = deferring the next phase transition until the overlay closes. `COMBAT_END` triggers defer the `finish_combat` receipt return. When C5 playback lands, the controller also gates the next playback step.
+
+### Tutorial spar (first consumer)
+- [ ] Encounter `training_spar_tutorial` in `EncounterCatalog`: Instructor as sparring partner (high HP, low damage), player from profile (C1). Non-lethal: on player HP ≤ threshold the spar ends via interlude + scripted win/neutral receipt, never a defeat screen
+- [ ] Tutorial gating fields on `CombatInterludeTrigger` (used only by tutorial):
+      `required_action_ids: Array[String]` (lock-in disabled until these are queued this turn), `allowed_palette_action_ids` (sidebar shows only these)
+- [ ] `CombatPlanningSidebar` support: palette filtering + lock-in disable with hint text (reads gating state from the interlude controller; sidebar stays dumb)
+- [ ] Scripted flow (3 short turns):
+      1. `COMBAT_START` interlude — Instructor explains points + Walk; palette = Walk only; lock-in requires a queued Walk
+      2. Turn 2 `PLANNING_START` — explains windup + Punch; palette = Walk/Punch; requires Punch queued
+      3. Turn 3 `PLANNING_START` — explains Block merging + defensive default; palette = Walk/Punch/Block; requires Block queued
+      4. `AFTER_RESOLVE` turn 3 — wrap-up interlude, then scripted end with receipt (`player_won = true`, small reward, sets flag `completed_combat_tutorial`)
+- [ ] Entry point: Training Grounds dialogue choice ("Spar with the Instructor") using existing `DialogueConsequence.start_combat_encounter_id`; hide/replace once `completed_combat_tutorial` is set (C1 flag reader)
+- [ ] Beam/Blink deliberately **not** tutorialized — discovery in real encounters; tooltip text on palette buttons is enough
+
+### Reuse path (post-demo, no rework expected)
+- Story beat mid-boss-fight = `HP_BELOW` trigger + normal `DialogueScript` (works with zero new code)
+- Cutscenes with camera/animation = new overlay variant behind the same controller checkpoints
+- Mid-playback stingers = same triggers gated on C5 playback step boundaries
+
+### Combat regression seed tests (land alongside C3, guards the signal additions)
+- [ ] Headless test script(s) under `tests/combat/`: block-chain merge, windup interrupt cancel, walk collision retry, simultaneous damage group — pinned RNG seed
+
+---
+
+## Calendar / Chronicle Checklist (Phase C, step C4)
 
 Reference `system-prompt.md` §6.
 
@@ -121,22 +233,20 @@ Reference `system-prompt.md` §6.
 
 ## Next Session Starter Tasks
 
-Pick up from **Phase C, step 9b (File Select rework)** unless directed otherwise:
+Pick up from **Phase C, step C1 (consequence readers)** unless directed otherwise:
 
 ```
-1. Main menu File Select: 3 always-visible slots (empty = new, occupied = load)
-2. Remove hub Save / SaveSlotsOverlay; autosave active file only
-3. Drop has_completed_first_run slot locking
-4. Keep PlayerChronicle in global meta; defer slot delete
+1. EncounterCatalog.build_player_from_profile — combat player stats from PlayerProfile
+2. Hub location gating via progression flags (is_unlocked reader)
+3. One flag-aware branch in elder_audience dialogue
 ```
 
 **Key files to open:**
-- `scenes/main_menu/main_menu.gd` / `.tscn`
-- `core/game_state_manager.gd`
-- `core/save_service.gd`
-- `ui/overlays/save_slots_overlay.gd` / `.tscn` (retarget or replace)
-- `scenes/home_hub/home_hub.gd` / `.tscn` (remove Save)
-- `architecture.md` — Save / load target
+- `combat/data/encounter_catalog.gd`
+- `core/data/hub_location_catalog.gd` / `scenes/home_hub/home_hub.gd`
+- `core/data/dialogue_catalog.gd` / `core/data/dialogue_line.gd`
+
+Then proceed C2 (dialogue playback extraction) → C3 (combat interludes + tutorial spar) → C4 (calendar slice) → C5 (minimal playback) → C6 (shop) → C7 (settings).
 
 ---
 
@@ -164,7 +274,7 @@ Reference `system-prompt.md` §4.11 for algorithm.
 - [x] `DialogueChoice` Resource (text, consequence mutations)
 - [x] `ConsequenceEngine` — apply deltas to `PlayerProfile`, global flags
 - [x] Dialogue backlog/history panel
-- [ ] Character portrait controller (texture swap; color stub in place)
+- [x] Character portrait controller — `PortraitCatalog` + TextureRect swap (partial art; color stub fallback)
 - [ ] NPC affection / hostility metrics (deferred)
 
 ---
@@ -196,4 +306,4 @@ gh repo create "Visual-Novel-Godot-Project" --public --source=. --remote=origin 
 
 Copy into next chat:
 
-> **Project:** CultivationGame1 (Godot 4.6) at `~/Documents/GodotGames/cultivation-game-1`. Manifest at `~/visual-novel-godot-project/system-prompt.md`. Phase A–B combat are built; Phase C save plumbing exists but UX is wrong. Next priority: Phase C step 9b — Hollow Knight / SMG2 File Select (3 always-visible files from main menu; no hub slot picker; no first-run slot lock; delete deferred). Then step 10 static art / portraits. Read `architecture.md` and `implementation-plan.md`.
+> **Project:** CultivationGame1 (Godot 4.6) at `~/Documents/GodotGames/cultivation-game-1`. Manifest at `~/visual-novel-godot-project/system-prompt.md`. Phase A–B combat, File Select save (9b), hub mountain art, and partial portraits (Instructor + Elder wise/stern) are built. Phase C was **reordered** after an architecture review: next priority is **C1 — consequence readers** (profile→combat stats, flag→hub gating, flag→dialogue branch), then C2 dialogue playback extraction, C3 combat interludes + tutorial spar, C4 calendar slice, C5 minimal resolution playback, C6 shop, C7 settings. Read `architecture.md` and `implementation-plan.md` (Phase C section + Combat Interlude & Tutorial Checklist).

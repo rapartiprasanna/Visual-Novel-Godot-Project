@@ -54,6 +54,7 @@ core/
   data/
     player_profile.gd
     player_chronicle.gd      # Global encountered-event stub
+    portrait_catalog.gd      # Speaker + expression → portrait texture
     hub_location_data.gd     # Includes content_type
     hub_location_catalog.gd
     dialogue_script.gd       # Script / Line / Choice / Consequence resources
@@ -73,7 +74,7 @@ ui/overlays/
   shop_overlay.tscn          # Also opened from Market Path
   player_profile_panel.tscn
   chronicle_calendar_panel.tscn
-  save_slots_overlay.tscn    # Exists; retarget to Main Menu File Select (remove from hub)
+  save_slots_overlay.tscn    # FileSelectPanel embedded on main menu (not a hub modal)
 
 combat/
   data/ core/ actions/ scenes/ enums/
@@ -107,31 +108,24 @@ combat/
 
 ## Main Menu Architecture
 
-**Target (spec):** Hollow Knight / SMG2 file select — see Save / load below.
-
-**As implemented today (incorrect; to rework):**
 - Canvas `Control` root, centered button panel.
-- **Continue** loads most recent slot; **New Game** ignores slot pick.
-- Slots 2–3 gated by `has_completed_first_run`.
-
-**Intended:**
-- Main menu shows **3 always-visible save files** (inline or dedicated File Select overlay).
-- Empty slot → `PlayerProfile.create_default()` → bind `active_save_slot` → hub.
-- Occupied slot → `load_game(slot)` → hub.
+- **File Select** (`ui/overlays/save_slots_overlay.tscn` as `FileSelectPanel`): **3 always-visible files**.
+  - Empty → `GameStateManager.select_file` starts a new run on that slot.
+  - Occupied → loads that slot into hub.
 - **Settings / Shop** = instanced overlay scenes; toggled visible, not separate scenes.
-- No “Continue most recent” shortcut required for the demo.
+- No New Game / Continue / “most recent” shortcut.
 
 ---
 
 ## Home Hub Architecture
 
-- **Background layer:** placeholder `ColorRect` bands (replace with static mountain image later).
+- **Background layer:** `assets/art/hub/sect_mountain.png` via full-bleed `TextureRect` (`stretch_mode` keep-aspect-covered).
 - **Hotspot layer:** `HubLocationCatalog.get_demo_locations()` spawns buttons; each has `content_type`.
 - **Routing:**
   - `DIALOGUE` → `GameStateManager.start_dialogue(trigger_id)`
   - `COMBAT` → `GameStateManager.start_combat(encounter_id)`
   - `SHOP` → show `ShopOverlay`
-- **Persistent overlay (top-right):** Settings, Profile, Chronicle, Main Menu. **No Save / slot picker** (remove `SaveSlotsOverlay` from hub).
+- **Persistent overlay (top-right):** Settings, Profile, Chronicle, Main Menu (no Save / slot picker).
 - **Persistence:** autosave overwrites the **active file only** (hub enter / return-to-hub / Main Menu exit).
 - **Info panel:** Location blurb; after combat, shows one-shot receipt summary.
 
@@ -151,7 +145,8 @@ combat/
 | `DialogueConsequence` | Karma/qi/cultivation deltas, flags, optional queued combat |
 | `DialogueCatalog` | Maps hub `narrative_trigger_id` → script |
 | `ConsequenceEngine` | Mutates `PlayerProfile` + progression flags |
-| Dialogue scene | Typewriter textbox, choice buttons, history panel, color portrait stub |
+| Dialogue scene | Typewriter textbox, choice buttons, history panel; `PortraitCatalog` texture swap (partial art + color fallback) |
+| `PortraitCatalog` | Maps speaker + expression → texture; Instructor one art; Elder wise/stern |
 
 **Demo scripts:** `training_grounds_intro` (linear + 2 choices), `elder_audience` (3-way branch).
 
@@ -191,25 +186,50 @@ combat/
 - `last_combat_receipt: CombatReceipt`
 - `progression_flags: Dictionary`
 
-**Remove / stop using for slot UX:** `has_completed_first_run` as a gate that unlocks files 2–3. (Flag may remain in global meta briefly during rework, but must not lock slots.)
-
 **Not yet present:** inventory, NPC relationship metrics, calendar clock / full chronicle UI (design locked in `system-prompt.md` §6).
 
-**Save / load — target (Phase C rework):**
+**Save / load (Phase C step 9b ✅):**
 
 | Piece | Path / role |
 |-------|-------------|
 | `SaveService` | `user://global_meta.json` + `user://saves/slot_N.json` |
 | Slot contents | `PlayerProfile` + `progression_flags` + timestamp (+ run calendar when §6 ships) |
-| Global meta | `PlayerChronicle` only (no slot-lock flag) |
+| Global meta | `PlayerChronicle` only |
 | Entry UX | Main menu File Select: 3 always-visible files |
-| Empty file | New run bound to that slot |
+| Empty file | New run bound to that slot (immediate write) |
 | Occupied file | Load that slot |
 | Autosave | Hub enter, return-to-hub, Main Menu exit → **active slot only** |
-| Hub Save UI | **Removed** — no multi-slot picker on hub |
-| Delete file | Deferred past demo (clear slot → empty again) |
+| Hub Save UI | Removed |
+| Delete file | Deferred past demo |
 
-**As implemented today (incorrect):** New Game / Continue + hub `SaveSlotsOverlay` + `has_completed_first_run` locking slots 1–2. Replace with File Select above.
+---
+
+## Combat Interlude & Tutorial Architecture (designed; not built — Phase C3)
+
+Mid-combat dialogue overlay system. Tutorial spar is the first consumer; same mechanism later serves story dialogue / cutscenes inside fights. Detailed checklist in `implementation-plan.md` (step C3).
+
+**Prerequisite (C2):** extract dialogue playback from `scenes/dialogue/dialogue_scene.gd` into:
+| Piece | Role |
+|-------|------|
+| `DialoguePlaybackController` | Script cursor, typewriter state, choices, consequences; signal-only output (`playback_finished` etc.); never navigates |
+| `DialogueTextboxView` | Reusable Control: portrait, speaker, body, choices; binds to a controller |
+| `dialogue_scene.gd` | Shrinks to a thin host that wires view + controller + `GameStateManager.finish_dialogue()` |
+
+**Interlude pieces:**
+| Piece | Role |
+|-------|------|
+| `CombatInterludeTrigger` (Resource) | Trigger type (combat start / planning start turn N / after resolve / HP below / defeated / action queued / combat end) + `dialogue_script_id` + tutorial gating fields (`required_action_ids`, `allowed_palette_action_ids`) |
+| `EncounterCatalog.get_interludes(id)` | Per-encounter trigger list; empty for normal fights |
+| `CombatInterludeController` (arena node) | Listens to `CombatTurnManager` checkpoint signals; blocks arena input; shows overlay; resumes on `playback_finished` |
+| `CombatDialogueOverlay` (CanvasLayer) | Dim layer + embedded `DialogueTextboxView` over the arena — combat scene is never unloaded |
+
+**Boundary rules:**
+- `CombatResolutionEngine` untouched; pauses only at phase/checkpoint boundaries owned by `CombatTurnManager` / arena.
+- `CombatTurnManager` gains `turn_number` + checkpoint signals (`planning_started`, `resolution_finished`, `combatant_defeated`, `player_action_queued`) — signals only, no dialogue awareness.
+- Interlude scripts are ordinary `DialogueScript` resources in `DialogueCatalog`; consequences flow through `ConsequenceEngine` as usual.
+- Tutorial gating: sidebar palette filter + lock-in disable read from the interlude controller; sidebar stays dumb.
+
+**Tutorial encounter:** `training_spar_tutorial` (Instructor, non-lethal, scripted 3-turn Walk → Punch → Block progression, ends via interlude + receipt setting `completed_combat_tutorial`). Entry: Training Grounds dialogue choice via existing `DialogueConsequence.start_combat_encounter_id`.
 
 ---
 
@@ -248,8 +268,12 @@ All overlays extend `PanelContainer`, share:
 
 ## Pending Infrastructure
 
-- **File Select rework:** Replace New Game/Continue + hub slot picker + first-run locks with title-screen 3-file select (see Save / load target).
+- **Consequence readers:** flags/profile are written but nothing reads them — profile→combat stats, flag→hub gating, flag→dialogue branching (Phase C step C1, next up).
+- **Dialogue playback extraction:** `DialoguePlaybackController` + `DialogueTextboxView` split out of `dialogue_scene.gd` (Phase C step C2).
+- **Combat interludes + tutorial spar:** see section above (Phase C step C3).
+- **Shop + inventory:** Overlay is a stub; item resources / buy flow / save payload not built (Phase C step C6 after reorder).
 - **Calendar / Chronicle UI wiring:** Spec’d in §6; clock/resolver not built (PlayerChronicle stub persists now).
 - **Qi cost:** Field reserved on `CombatAction`; not enforced.
 - **Mastery / cooldown:** Designed in spec; not in code.
-- **Portrait art:** Expression keys exist; textures not yet.
+- **Portrait art (partial):** `instructor1`, `sect_elder_wise`, `sect_elder_stern` wired; more expression variants optional later.
+- **Save file delete:** Deferred past demo.
