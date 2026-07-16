@@ -68,17 +68,21 @@ HUD scenes use full-rect Control anchors (no `Camera2D`). Combat sidebar: scroll
 
 ```
 core/
-  game_state_manager.gd      # Autoload: navigation, profile, flags, dialogue/combat, save/load
+  game_state_manager.gd      # Autoload: navigation, profile, flags, dialogue/combat, save/load, calendar
   save_service.gd            # user:// JSON global meta + slot files
   consequence_engine.gd      # Applies DialogueConsequence mutations
-  enums/game_enums.gd        # GameScene + HubContentType
+  activity_resolver.gd       # C4: look-ahead collapse algorithm (§6.6)
+  enums/game_enums.gd        # GameScene + HubContentType + ChronicleEventType
   dialogue/
     dialogue_playback_controller.gd  # C2: cursor / typewriter / choices (no GSM nav)
   data/
     player_profile.gd
-    player_chronicle.gd      # Global encountered-event stub
+    player_chronicle.gd      # Global encountered-event stub (C4: fed by commit_activity)
+    run_calendar_state.gd    # C4: per-slot day / activity log / consumed event ids
+    master_chronicle_event.gd / master_chronicle.gd  # C4: timed story event catalog
+    place_catalog.gd         # C4: nested place matching for event triggers
     portrait_catalog.gd      # Speaker + expression → portrait texture
-    hub_location_data.gd     # content_type + required_unlock_flag
+    hub_location_data.gd     # content_type + required_unlock_flag + time_cost_days
     hub_location_catalog.gd
     dialogue_script.gd       # Script / Line / Choice / Consequence resources
     dialogue_line.gd
@@ -153,9 +157,9 @@ combat/
 - **Persistence:** autosave overwrites the **active file only** (hub enter / return-to-hub / Main Menu exit).
 - **Info panel:** Location blurb; after combat, shows one-shot receipt summary.
 
-**Demo hotspots:** Training Grounds, Elder's Pavilion, Mountain Gate (1v1), Outer Slope (1v2, gated), Market Path.
+**Demo hotspots:** Training Grounds, Elder's Pavilion, Meditation Chamber (seclusion), Mountain Gate (1v1), Outer Slope (1v2, gated), Market Path.
 
-**Time costs (per §6, when calendar ships):** Training Grounds = 1 day; Elder = instant.
+**Time costs (C4 ✅):** Training Grounds = 1 day (may collapse into `instructor_night_visit` from day 2 onward); Elder = instant; Meditation Chamber = 3-day seclusion (no event scan). Mountain Gate / Outer Slope / Market Path stay 0 for now.
 
 **Planned — omnidirectional map scroll (Phase D):** today the mountain is a locked full-bleed frame. Future: scrollable/pannable map root larger than the viewport so the hub feels like moving around a place; surroundings beyond the mountain become extra hotspots. Persistent chrome stays on a fixed CanvasLayer. See `implementation-plan.md` → Phase D → Hub omnidirectional scroll.
 
@@ -168,7 +172,7 @@ combat/
 | `DialogueScript` | Ordered/branching lines keyed by `line_id` | ✅ |
 | `DialogueLine` | Speaker, expression key, text, optional choices / next; flag gates | ✅ |
 | `DialogueChoice` | Button text, next line, consequence; flag gates | ✅ |
-| `DialogueConsequence` | Karma/qi/cultivation/affection deltas, flags, combat, dialogue chain, return-to-menu | ✅ |
+| `DialogueConsequence` | Karma/qi/stat deltas, flags, combat, dialogue chain, return-to-menu | ✅ |
 | `DialogueCatalog` | Maps trigger ID → script (hub + intro + tutorial interludes) | ✅ |
 | `ConsequenceEngine` | Mutates `PlayerProfile` + progression flags; queues combat/dialogue/menu | ✅ |
 | `DialoguePlaybackController` | Script cursor, typewriter, choices, `[playerName]`, name input; signal-only | ✅ C2/C3 |
@@ -193,7 +197,8 @@ combat/
 | `CombatTurnManager` | Planning, queue, NPC AI, leftover defaults, delegates resolve | ✅ |
 | `CombatResolutionEngine` | Timeline resolve: blocks, interrupts, simultaneous damage, substitutes | ✅ |
 | `CombatTimeline` | Per-fighter event schedule, block merging | ✅ Built |
-| `DamageCalculator` | Ratio damage + block mitigation + small RNG | ✅ Built |
+| `DamageCalculator` | Base damage + layered mitigation (passive ratio + active block) + small RNG | ✅ Refactored |
+| `CultivationScaler` | Realm-based base stat / title scaling utility (`core/data/cultivation_scaler.gd`) | ✅ Built (not yet wired into `PlayerProfile`) |
 | `GridUtils` | Manhattan/Chebyshev, paths, beam lines | ✅ Built |
 | `TurnPacingCalculator` | Fixed 3s demo; dynamic stub | ✅ Stub |
 | `CombatAction` / `.tres` | Data-driven techniques (`block_skill_factor` on Block) | ✅ Built |
@@ -216,6 +221,7 @@ combat/
 `GameStateManager` holds:
 - `player_profile: PlayerProfile`
 - `player_chronicle: PlayerChronicle` — global meta stub (encountered event ids; survives across files)
+- `run_calendar: RunCalendarState` — per-slot day / activity log / consumed event ids (C4)
 - `active_save_slot: int` — file chosen at File Select; all mid-run writes go here
 - `current_scene: GameEnums.GameScene`
 - `active_dialogue_trigger_id` / `active_encounter_id`
@@ -227,14 +233,14 @@ combat/
 
 **Scene routing:** `navigate_to(scene)` updates `current_scene`, emits `scene_changed`, then applies `change_scene_to_file` on the next frame (`_apply_queued_scene_change`). Multiple `navigate_to` calls in one frame coalesce to the last target.
 
-**Not yet present:** inventory, full NPC relationship system (demo has `escort_disciple_affection` stub only), calendar clock / full chronicle UI (design locked in `system-prompt.md` §6).
+**Not yet present:** inventory, full NPC relationship system (demo has `escort_disciple_affection` stub only). Calendar clock / chronicle UI now built (C4) — village hubs, travel corridors, forced mains, and year-scale UI chrome remain Phase D per `system-prompt.md` §6.8.
 
 **Save / load (Phase C step 9b ✅):**
 
 | Piece | Path / role |
 |-------|-------------|
 | `SaveService` | `user://global_meta.json` + `user://saves/slot_N.json` |
-| Slot contents | `PlayerProfile` + `progression_flags` + timestamp (+ run calendar when §6 ships) |
+| Slot contents | `PlayerProfile` + `progression_flags` + timestamp + `run_calendar` (C4, `SAVE_VERSION` 3) |
 | Global meta | `PlayerChronicle` only |
 | Entry UX | Main menu File Select: 3 always-visible files |
 | Empty file | New run bound to that slot (immediate write) |
@@ -268,23 +274,29 @@ Mid-combat dialogue overlay system. The intro's bandit tutorial fight is the fir
 
 ---
 
-## Calendar / Chronicle Architecture (designed; not built)
+## Calendar / Chronicle Architecture (Phase C4 ✅)
 
-Design authority: `system-prompt.md` Section 6. Intended split:
+Design authority: `system-prompt.md` Section 6.
 
-| Piece | Role |
-|-------|------|
-| `MasterChronicle` (Resources / catalog) | Authoring truth: place, trigger range, duration, type, recurrence, content hook |
-| `PlayerChronicle` (global meta save) | Cross-run encountered events → future Calendar markers |
-| Run calendar state (per save slot) | Current date, consumed events, activity log |
-| `ActivityResolver` (service) | Look-ahead overlap, travel priority, seclusion policy, date advance |
-| `ChronicleCalendarPanel` | Single UI merging run past + PlayerChronicle future (color + faded borders) |
+| Piece | Role | Status |
+|-------|------|--------|
+| `MasterChronicleEvent` / `MasterChronicle` (`core/data/master_chronicle_event.gd`, `core/data/master_chronicle.gd`) | Authoring truth: place, trigger range, duration, type, content hook (`dialogue_script_id`) | ✅ 1 demo event (`instructor_night_visit`) |
+| `PlaceCatalog` (`core/data/place_catalog.gd`) | Nested place hierarchy for event matching (parent → any child; siblings never match) | ✅ |
+| `PlayerChronicle` (global meta save, unchanged from earlier phase) | Cross-run encountered events → future Calendar markers | ✅ now fed by `commit_activity` |
+| `RunCalendarState` (`core/data/run_calendar_state.gd`, per save slot) | Current day, activity log, consumed event ids | ✅ persisted via `SaveService` (`SAVE_VERSION` 3) |
+| `ActivityResolver` (`core/activity_resolver.gd`) | Look-ahead collapse, date advance | ✅ |
+| `GameStateManager.commit_activity` / `commit_seclusion` | Hub entry points into the resolver / direct calendar advance | ✅ |
+| `ChronicleCalendarPanel` (`ui/overlays/chronicle_calendar_panel.gd`) | Single UI merging run past + PlayerChronicle future (color + italic "faded" markers) | ✅ |
 
-**Nested places:** parent match includes children; siblings do not. Travel roads are place nodes.
+**Nested places:** parent match includes children; siblings do not. Travel roads (Phase D) are place nodes too; `PlaceCatalog.PARENTS` currently maps all demo hub locations under `sect_mountain`.
 
-**Hub time costs (demo):** Elder instant; Training Grounds costs 1 day. Other day-cost activities added with calendar work.
+**Hub time costs (demo):** `elders_pavilion` = 0 (instant, skips the calendar entirely); `training_grounds` = 1 day. `mountain_gate` / `outer_slope` / `market_path` stay 0 for now (day costs TBD with future calendar content). `meditation_chamber` (new, `HubContentType.SECLUSION`) defaults to 3 days.
 
-**Advance rule on interrupt:** `days_until_first_overlap + event.duration`. Lead-in days logged as the chosen activity without playing generic empty beats.
+**Advance rule on overlap:** `ActivityResolver.resolve` scans `[T0, T0+D)` for an unconsumed `MasterChronicleEvent` matching the activity's place; on a hit, `advance = days_until_first_overlap + event.duration_days`, with lead-in days logged as the chosen activity (no generic empty beat) before the event's own log entry. No overlap → flavor text + `D`-day advance. Home hub prefers the triggered event's `dialogue_script_id` over the location's normal `narrative_trigger_id` when one fires.
+
+**Seclusion (`GameStateManager.commit_seclusion`):** intentionally bypasses `ActivityResolver` — it never scans for events (misses ordinary story beats by design per §6.6 step 1), just advances `run_calendar.current_day` directly, then the hub plays the location's cutscene dialogue (`seclusion_meditation`) whose consequence carries the stat bump.
+
+**Regression seeds:** `tests/calendar/activity_resolver_seed_test.gd` (instant/no-advance, flavor advance, event collapse + one-time consumption, place nesting) and `tests/calendar/save_migration_readonly_test.gd` (v2→v3 migration against real save slots, read-only — never writes back).
 
 ---
 
@@ -306,9 +318,9 @@ All overlays extend `PanelContainer`, share:
 - **Consequence readers:** ✅ C1 — profile→combat; hub/dialogue flag gates; hub `arrived_at_sect` gate ✅ with intro.
 - **Dialogue playback extraction:** ✅ C2 — embeddable textbox used by combat interludes.
 - **Combat interludes + bandit tutorial + intro plumbing/content:** ✅ C3 / C3b (art still color stubs; optional escort portraits later).
+- **Calendar / Chronicle UI wiring:** ✅ C4 — `RunCalendarState`, `MasterChronicle`, `PlaceCatalog`, `ActivityResolver`, `ChronicleCalendarPanel` all built; see Calendar / Chronicle Architecture above.
 - **Shop + inventory:** Overlay is a stub; item resources / buy flow / save payload not built (Phase C step C6).
-- **Calendar / Chronicle UI wiring:** Spec’d in §6; clock/resolver not built (**next: C4**).
-- **Minimal combat resolution playback:** deferred UI polish (**C5**).
+- **Minimal combat resolution playback:** deferred UI polish (**next: C5**).
 - **Hub omnidirectional map scroll:** Phase D.
 - **Qi cost / mastery / cooldown:** Spec only.
 - **Portrait art (partial):** Instructor + Elders wired; intro cast uses color stubs.
